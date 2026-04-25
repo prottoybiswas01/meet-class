@@ -539,12 +539,23 @@ async function toggleRecording() {
     }
 }
 
+let reusedScreenShare = false;
+let recordingVideoStream = null;
+
 async function startRecording() {
     try {
-        const displayStream = await navigator.mediaDevices.getDisplayMedia({ 
-            video: { cursor: "always" }, 
-            audio: true // Attempt to get system audio if possible
-        });
+        if (isScreenSharing && screenStream) {
+            // Reuse the existing screen share stream to prevent freezing (browser bug with multiple captures)
+            recordingVideoStream = screenStream;
+            reusedScreenShare = true;
+        } else {
+            // Request the user to select the screen to share
+            recordingVideoStream = await navigator.mediaDevices.getDisplayMedia({ 
+                video: { cursor: "always" }, 
+                audio: true // Attempt to get system audio if possible
+            });
+            reusedScreenShare = false;
+        }
 
         // Initialize AudioContext to mix all voices
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -564,15 +575,15 @@ async function startRecording() {
             }
         });
 
-        // 3. Add Screen System Audio (if any)
-        if (displayStream.getAudioTracks().length > 0) {
-            const displaySource = audioContext.createMediaStreamSource(displayStream);
+        // 3. Add Screen System Audio (if any and not reusing)
+        if (!reusedScreenShare && recordingVideoStream.getAudioTracks().length > 0) {
+            const displaySource = audioContext.createMediaStreamSource(recordingVideoStream);
             displaySource.connect(audioDestination);
         }
 
         // Combine the Screen Video Track with the Mixed Audio Track
         const combinedStream = new MediaStream([
-            displayStream.getVideoTracks()[0],
+            recordingVideoStream.getVideoTracks()[0],
             audioDestination.stream.getAudioTracks()[0]
         ]);
         
@@ -612,9 +623,11 @@ async function startRecording() {
         btnRecord.classList.replace('text-gray-300', 'text-red-500');
         recordingIndicator.classList.remove('hidden');
         
-        displayStream.getVideoTracks()[0].onended = () => {
-            if(isRecording) stopRecording();
-        };
+        if (!reusedScreenShare) {
+            recordingVideoStream.getVideoTracks()[0].onended = () => {
+                if(isRecording) stopRecording();
+            };
+        }
 
     } catch (err) {
         console.error("Error starting recording:", err);
@@ -625,7 +638,14 @@ async function startRecording() {
 function stopRecording() {
     if (mediaRecorder && mediaRecorder.state !== 'inactive') {
         mediaRecorder.stop();
-        mediaRecorder.stream.getTracks().forEach(track => track.stop());
+        
+        // Always stop the mixed audio track
+        mediaRecorder.stream.getAudioTracks().forEach(track => track.stop());
+        
+        // Only stop the video track if we didn't reuse it from screen share
+        if (!reusedScreenShare && recordingVideoStream) {
+            recordingVideoStream.getVideoTracks().forEach(track => track.stop());
+        }
     }
 }
 
