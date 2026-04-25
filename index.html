@@ -25,12 +25,15 @@
     <!-- Custom CSS for specific styling -->
     <style>
         body { font-family: 'Inter', sans-serif; background-color: #f3f4f6; }
-        .video-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem; }
-        .video-container { position: relative; background: #000; border-radius: 0.5rem; overflow: hidden; aspect-ratio: 16/9; }
+        .video-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem; align-content: start; }
+        .video-container { position: relative; background: #000; border-radius: 0.5rem; overflow: hidden; aspect-ratio: 16/9; transition: all 0.3s ease; }
         video { width: 100%; height: 100%; object-fit: cover; }
-        .name-label { position: absolute; bottom: 10px; left: 10px; background: rgba(0,0,0,0.6); color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.875rem; }
+        .name-label { position: absolute; bottom: 10px; left: 10px; background: rgba(0,0,0,0.6); color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.875rem; z-index: 10; }
         /* Hide sections by default */
         .hidden-section { display: none !important; }
+        /* Focus Mode Classes */
+        .grid-focus-sidebar { display: flex !important; gap: 1rem; overflow-x: auto; overflow-y: hidden; padding-bottom: 0.5rem; height: 160px; flex-shrink: 0; align-items: stretch; }
+        .grid-focus-sidebar .video-container { height: 100%; width: 240px; flex-shrink: 0; }
     </style>
 </head>
 <body class="h-screen w-screen flex flex-col text-gray-800">
@@ -113,11 +116,19 @@
         <!-- Main Content Area -->
         <main class="flex-1 flex overflow-hidden">
             
-            <!-- Video Grid Area -->
-            <div class="flex-1 p-4 overflow-y-auto">
-                <div id="video-grid" class="video-grid h-full">
+            <!-- Video Area -->
+            <div id="video-area" class="flex-1 p-4 flex flex-col overflow-hidden h-full">
+                
+                <!-- Focus Container for Screen Share -->
+                <div id="focus-container" class="hidden flex-1 min-h-0 bg-black rounded-lg overflow-hidden mb-4 relative shadow-xl">
+                    <video id="focus-video" autoplay playsinline class="w-full h-full object-contain"></video>
+                    <div id="focus-name" class="name-label">Screen Share</div>
+                </div>
+
+                <!-- Video Grid / Sidebar -->
+                <div id="video-grid" class="video-grid flex-1 overflow-y-auto">
                     <!-- Local Video -->
-                    <div class="video-container shadow-lg">
+                    <div id="video-container-local" class="video-container shadow-lg">
                         <video id="local-video" autoplay muted playsinline></video>
                         <div class="name-label">You</div>
                     </div>
@@ -147,8 +158,8 @@
                 <i class="fa-solid fa-video"></i>
             </button>
             
-            <!-- Admin Only Buttons -->
-            <button id="btn-screen-share" class="hidden w-12 h-12 rounded-full bg-gray-700 hover:bg-blue-600 hover:text-white text-gray-300 flex items-center justify-center transition focus:outline-none" title="Share Screen">
+            <!-- Screen Share (Available for all) -->
+            <button id="btn-screen-share" class="w-12 h-12 rounded-full bg-gray-700 hover:bg-blue-600 hover:text-white text-gray-300 flex items-center justify-center transition focus:outline-none" title="Share Screen">
                 <i class="fa-solid fa-display"></i>
             </button>
             

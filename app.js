@@ -32,7 +32,10 @@ const btnScreenShare = document.getElementById('btn-screen-share');
 const recordingIndicator = document.getElementById('recording-indicator');
 
 // Meeting Controls
-const videoGrid = document.getElementById('video-grid');
+const videoAreaGrid = document.getElementById('video-grid');
+const focusContainer = document.getElementById('focus-container');
+const focusVideo = document.getElementById('focus-video');
+const focusName = document.getElementById('focus-name');
 const localVideo = document.getElementById('local-video');
 const btnToggleAudio = document.getElementById('btn-toggle-audio');
 const btnToggleVideo = document.getElementById('btn-toggle-video');
@@ -43,15 +46,12 @@ let isAdmin = false;
 let peer = null;
 let localStream = null;
 let adminPeerId = null;
-
-// Admin state
-const pendingRequests = new Map(); // peerId -> { name, connection }
-const activeConnections = new Map(); // peerId -> connection
-const activeCalls = new Map(); // peerId -> call
-
-// User state
 let myName = "";
-let adminConnection = null;
+
+// Full Mesh state
+// peerId -> { name, connection, call, stream }
+const peersData = new Map(); 
+const pendingRequests = new Map(); // Admin only
 
 // Recording & Screen Share state
 let mediaRecorder = null;
@@ -60,16 +60,16 @@ let isRecording = false;
 let isScreenSharing = false;
 let screenStream = null;
 
+let audioContext;
+let audioDestination;
+
 // === Initialization ===
 function init() {
-    // Check if URL has a hash (invite link)
     const hash = window.location.hash.substring(1);
     if (hash) {
         adminPeerId = hash;
-        // Hide admin login button if joining via link
         btnShowAdminLogin.classList.add('hidden');
     }
-
     setupEventListeners();
 }
 
@@ -94,36 +94,22 @@ async function startLocalVideo() {
 
 // === Event Listeners ===
 function setupEventListeners() {
-    // Show Admin Login
-    btnShowAdminLogin.addEventListener('click', () => {
-        screens.adminLogin.classList.remove('hidden-section');
-    });
-
-    // Cancel Admin Login
+    btnShowAdminLogin.addEventListener('click', () => screens.adminLogin.classList.remove('hidden-section'));
     btnCancelAdmin.addEventListener('click', () => {
         screens.adminLogin.classList.add('hidden-section');
         loginError.classList.add('hidden');
     });
-
-    // Admin Login Logic
     btnAdminLogin.addEventListener('click', handleAdminLogin);
-
-    // User Join Logic
     btnRequestJoin.addEventListener('click', handleUserJoinRequest);
-
-    // Meeting Controls
     btnToggleAudio.addEventListener('click', toggleAudio);
     btnToggleVideo.addEventListener('click', toggleVideo);
     btnLeave.addEventListener('click', leaveMeeting);
 
-    // Admin specific controls
     btnCopyLink.addEventListener('click', () => {
         inputInviteLink.select();
         document.execCommand('copy');
         btnCopyLink.innerHTML = '<i class="fa-solid fa-check text-green-500"></i>';
-        setTimeout(() => {
-            btnCopyLink.innerHTML = '<i class="fa-regular fa-copy"></i>';
-        }, 2000);
+        setTimeout(() => btnCopyLink.innerHTML = '<i class="fa-regular fa-copy"></i>', 2000);
     });
 
     btnRecord.addEventListener('click', toggleRecording);
@@ -135,70 +121,141 @@ async function handleAdminLogin() {
     const id = inputAdminId.value;
     const pass = inputAdminPass.value;
 
-    // Hardcoded credentials as requested
     if (id === 'admin' && pass === '123456') {
         isAdmin = true;
+        myName = "Host";
         screens.adminLogin.classList.add('hidden-section');
         
         const mediaSuccess = await startLocalVideo();
         if(!mediaSuccess) return;
 
         showScreen('meeting');
-        
-        // Show Admin UI parts
         adminControlsHeader.classList.remove('hidden');
         adminSidebar.classList.remove('hidden');
         btnRecord.classList.remove('hidden');
-        btnScreenShare.classList.remove('hidden');
 
-        initializeAdminPeer();
+        initializePeer();
     } else {
         loginError.classList.remove('hidden');
     }
 }
 
-function initializeAdminPeer() {
-    // Generate a random ID for this meeting
-    const roomId = 'meet-' + Math.random().toString(36).substr(2, 9);
-    peer = new Peer(roomId);
+// === User Functions ===
+async function handleUserJoinRequest() {
+    myName = inputJoinName.value.trim();
+    if (!myName) return joinError.classList.remove('hidden');
+    if (!adminPeerId) {
+        joinError.innerText = "No meeting ID found in link.";
+        return joinError.classList.remove('hidden');
+    }
+
+    const mediaSuccess = await startLocalVideo();
+    if(!mediaSuccess) return;
+
+    showScreen('waiting');
+    initializePeer();
+}
+
+// === Peer Initialization (Mesh) ===
+function initializePeer() {
+    peer = new Peer(isAdmin ? ('meet-' + Math.random().toString(36).substr(2, 9)) : undefined);
 
     peer.on('open', (id) => {
-        console.log('Admin Peer ID:', id);
-        // Generate Invite Link
-        const inviteUrl = `${window.location.origin}${window.location.pathname}#${id}`;
-        inputInviteLink.value = inviteUrl;
+        console.log('My Peer ID:', id);
+        
+        if (isAdmin) {
+            inputInviteLink.value = `${window.location.origin}${window.location.pathname}#${id}`;
+        } else {
+            // User joins Admin
+            const conn = peer.connect(adminPeerId, {metadata: {name: myName}});
+            peersData.set(adminPeerId, {name: "Host", connection: conn});
+            
+            conn.on('open', () => conn.send({ type: 'request-join', name: myName }));
+            setupConnectionListeners(conn);
+        }
     });
 
-    // Listen for incoming data connections (Join Requests)
     peer.on('connection', (conn) => {
-        conn.on('data', (data) => {
-            if (data.type === 'request-join') {
-                handleIncomingJoinRequest(conn.peer, data.name, conn);
+        // Handle incoming data connections
+        const remoteName = conn.metadata ? conn.metadata.name : "User";
+        
+        if (isAdmin && !peersData.has(conn.peer)) {
+            // New join request
+            pendingRequests.set(conn.peer, {name: remoteName, conn});
+            updateRequestsUI();
+        } else {
+            // Full Mesh: peer connecting directly
+            if (!peersData.has(conn.peer)) {
+                peersData.set(conn.peer, {name: remoteName, connection: conn});
+            } else {
+                peersData.get(conn.peer).connection = conn;
             }
-        });
+            setupConnectionListeners(conn);
+        }
     });
 
-    // We also need to be ready to receive calls just in case, but usually admin initiates.
-    // Actually in WebRTC, whoever initiates call sends offer. Admin will initiate call after approval.
+    peer.on('call', (call) => {
+        // Handle incoming media calls
+        call.answer(localStream);
+        const remoteName = call.metadata ? call.metadata.name : "User";
+        
+        if (!peersData.has(call.peer)) {
+            peersData.set(call.peer, {name: remoteName});
+        }
+        setupCallListeners(call, remoteName);
+    });
 }
 
-function handleIncomingJoinRequest(peerId, name, conn) {
-    if (pendingRequests.has(peerId)) return;
+function setupConnectionListeners(conn) {
+    conn.on('data', data => {
+        if (data.type === 'request-join' && isAdmin) {
+            if (!peersData.has(conn.peer)) {
+                pendingRequests.set(conn.peer, {name: data.name, conn});
+                updateRequestsUI();
+            }
+        } else if (data.type === 'approved' && !isAdmin) {
+            handleApproved(data.peers);
+        } else if (data.type === 'rejected' && !isAdmin) {
+            alert("Your request to join was rejected by the admin.");
+            window.location.reload();
+        } else if (data.type === 'new-peer') {
+            // Just register their info, wait for them to connect
+            if (!peersData.has(data.id)) peersData.set(data.id, {name: data.name});
+        } else if (data.type === 'screen-share-start') {
+            handleScreenShareStart(conn.peer);
+        } else if (data.type === 'screen-share-stop') {
+            handleScreenShareStop(conn.peer);
+        }
+    });
 
-    pendingRequests.set(peerId, { name, conn });
-    updateRequestsUI();
+    conn.on('close', () => removeUser(conn.peer));
 }
 
+function setupCallListeners(call, name) {
+    const pData = peersData.get(call.peer);
+    pData.call = call;
+
+    call.on('stream', stream => {
+        // Check if stream is already handled
+        if (pData.stream && pData.stream.id === stream.id) return;
+        
+        pData.stream = stream;
+        addVideoStream(call.peer, stream, name);
+        
+        // If recording is active, plug this new stream into the mix
+        if (isRecording && audioContext && audioDestination && stream.getAudioTracks().length > 0) {
+            const remoteSource = audioContext.createMediaStreamSource(stream);
+            remoteSource.connect(audioDestination);
+        }
+    });
+    call.on('close', () => removeUser(call.peer));
+}
+
+// === Admin Approval Flow ===
 function updateRequestsUI() {
     requestsList.innerHTML = '';
     requestCount.innerText = pendingRequests.size;
-
-    if (pendingRequests.size === 0) {
-        noRequests.classList.remove('hidden');
-        return;
-    }
-    
-    noRequests.classList.add('hidden');
+    noRequests.classList.toggle('hidden', pendingRequests.size > 0);
 
     pendingRequests.forEach((req, peerId) => {
         const div = document.createElement('div');
@@ -206,12 +263,8 @@ function updateRequestsUI() {
         div.innerHTML = `
             <span class="font-medium text-sm truncate w-24" title="${req.name}">${req.name}</span>
             <div class="flex gap-2">
-                <button class="bg-red-500 hover:bg-red-600 w-8 h-8 rounded text-white flex items-center justify-center transition" onclick="rejectUser('${peerId}')">
-                    <i class="fa-solid fa-xmark"></i>
-                </button>
-                <button class="bg-green-500 hover:bg-green-600 w-8 h-8 rounded text-white flex items-center justify-center transition" onclick="approveUser('${peerId}')">
-                    <i class="fa-solid fa-check"></i>
-                </button>
+                <button class="bg-red-500 hover:bg-red-600 w-8 h-8 rounded text-white flex items-center justify-center" onclick="rejectUser('${peerId}')"><i class="fa-solid fa-xmark"></i></button>
+                <button class="bg-green-500 hover:bg-green-600 w-8 h-8 rounded text-white flex items-center justify-center" onclick="approveUser('${peerId}')"><i class="fa-solid fa-check"></i></button>
             </div>
         `;
         requestsList.appendChild(div);
@@ -220,29 +273,26 @@ function updateRequestsUI() {
 
 window.approveUser = function(peerId) {
     const req = pendingRequests.get(peerId);
-    if (req) {
-        // Send approval message
-        req.conn.send({ type: 'approved' });
-        
-        // Keep connection active
-        activeConnections.set(peerId, req.conn);
-        
-        // Initiate Media Call to the user
-        const call = peer.call(peerId, localStream);
-        
-        call.on('stream', (remoteStream) => {
-            addVideoStream(peerId, remoteStream, req.name);
-        });
+    if (!req) return;
 
-        activeCalls.set(peerId, call);
-        
-        // Cleanup on disconnect
-        req.conn.on('close', () => removeUser(peerId));
-        call.on('close', () => removeUser(peerId));
+    // Send active peer list to new user
+    const currentPeers = [];
+    peersData.forEach((d, id) => {
+        if (d.connection && id !== adminPeerId && id !== peerId) currentPeers.push({id, name: d.name});
+    });
 
-        pendingRequests.delete(peerId);
-        updateRequestsUI();
-    }
+    req.conn.send({ type: 'approved', peers: currentPeers });
+    
+    // Broadcast new user to existing peers
+    peersData.forEach((d, id) => {
+        if (d.connection && id !== peerId && id !== adminPeerId) {
+            d.connection.send({ type: 'new-peer', id: peerId, name: req.name });
+        }
+    });
+
+    peersData.set(peerId, {name: req.name, connection: req.conn});
+    pendingRequests.delete(peerId);
+    updateRequestsUI();
 };
 
 window.rejectUser = function(peerId) {
@@ -255,77 +305,29 @@ window.rejectUser = function(peerId) {
     }
 };
 
-// === User Functions ===
-async function handleUserJoinRequest() {
-    myName = inputJoinName.value.trim();
-    if (!myName) {
-        joinError.innerText = "Please enter your name.";
-        joinError.classList.remove('hidden');
-        return;
-    }
-    if (!adminPeerId) {
-        joinError.innerText = "No meeting ID found in link.";
-        joinError.classList.remove('hidden');
-        return;
-    }
+// === User Approved Flow ===
+function handleApproved(roomPeers) {
+    showScreen('meeting');
+    
+    // Call Admin
+    const adminCall = peer.call(adminPeerId, localStream, {metadata: {name: myName}});
+    setupCallListeners(adminCall, "Host");
 
-    const mediaSuccess = await startLocalVideo();
-    if(!mediaSuccess) return;
-
-    // Show waiting screen
-    showScreen('waiting');
-
-    // Initialize User Peer
-    peer = new Peer();
-
-    peer.on('open', (id) => {
-        console.log('My User Peer ID:', id);
-        // Connect to Admin
-        adminConnection = peer.connect(adminPeerId);
-
-        adminConnection.on('open', () => {
-            // Send join request
-            adminConnection.send({ type: 'request-join', name: myName });
-        });
-
-        adminConnection.on('data', (data) => {
-            if (data.type === 'approved') {
-                // Admin approved! Wait for call.
-                console.log("Approved! Waiting for call...");
-            } else if (data.type === 'rejected') {
-                alert("Your request to join was rejected by the admin.");
-                showScreen('landing');
-            }
-        });
-
-        adminConnection.on('close', () => {
-            alert("Connection to meeting host lost.");
-            leaveMeeting();
-        });
-    });
-
-    // Listen for Admin calling us
-    peer.on('call', (call) => {
-        console.log("Receiving call from Admin...");
-        // Answer call with our stream
-        call.answer(localStream);
+    // Connect & Call other peers in the room
+    roomPeers.forEach(p => {
+        // Connect Data
+        const conn = peer.connect(p.id, {metadata: {name: myName}});
+        peersData.set(p.id, {name: p.name, connection: conn});
+        setupConnectionListeners(conn);
         
-        showScreen('meeting');
-        
-        call.on('stream', (remoteStream) => {
-            addVideoStream('admin', remoteStream, 'Host');
-        });
-
-        call.on('close', () => {
-            alert("Meeting ended by host.");
-            leaveMeeting();
-        });
+        // Connect Media
+        const call = peer.call(p.id, localStream, {metadata: {name: myName}});
+        setupCallListeners(call, p.name);
     });
 }
 
 // === Shared Video & Controls Functions ===
 function addVideoStream(id, stream, name) {
-    // Check if already exists
     if (document.getElementById(`video-container-${id}`)) return;
 
     const container = document.createElement('div');
@@ -343,14 +345,18 @@ function addVideoStream(id, stream, name) {
 
     container.appendChild(video);
     container.appendChild(label);
-    videoGrid.appendChild(container);
+    videoAreaGrid.appendChild(container);
 }
 
 function removeUser(id) {
     const el = document.getElementById(`video-container-${id}`);
     if (el) el.remove();
-    activeConnections.delete(id);
-    activeCalls.delete(id);
+    peersData.delete(id);
+    
+    if (id === adminPeerId && !isAdmin) {
+        alert("Meeting ended by host.");
+        window.location.reload();
+    }
 }
 
 function toggleAudio() {
@@ -374,7 +380,7 @@ function toggleVideo() {
         videoTrack.enabled = false;
         btnToggleVideo.innerHTML = '<i class="fa-solid fa-video-slash"></i>';
         btnToggleVideo.classList.replace('bg-gray-700', 'bg-red-600');
-        localVideo.style.opacity = '0.3'; // Visual feedback for user
+        localVideo.style.opacity = '0.3';
     } else {
         videoTrack.enabled = true;
         btnToggleVideo.innerHTML = '<i class="fa-solid fa-video"></i>';
@@ -383,37 +389,39 @@ function toggleVideo() {
     }
 }
 
+// === Screen Share Flow & Layout ===
 async function toggleScreenShare() {
-    if (!isAdmin) return;
-
     if (isScreenSharing) {
-        // Stop screen share and revert to camera
         stopScreenShare();
     } else {
-        // Start screen share
         try {
             screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
             const screenTrack = screenStream.getVideoTracks()[0];
             
-            // Replace local video preview
-            localVideo.srcObject = screenStream;
-            
             // Replace track for all active calls
-            activeCalls.forEach((call) => {
-                const sender = call.peerConnection.getSenders().find(s => s.track.kind === 'video');
-                if (sender) {
-                    sender.replaceTrack(screenTrack);
+            peersData.forEach(p => {
+                if (p.call) {
+                    const sender = p.call.peerConnection.getSenders().find(s => s.track.kind === 'video');
+                    if (sender) sender.replaceTrack(screenTrack);
                 }
             });
 
             isScreenSharing = true;
             btnScreenShare.classList.replace('text-gray-300', 'text-blue-500');
 
-            // Handle browser's native "Stop sharing" button
-            screenTrack.onended = () => {
-                if (isScreenSharing) stopScreenShare();
-            };
+            // Broadcast
+            peersData.forEach(p => {
+                if (p.connection) p.connection.send({type: 'screen-share-start'});
+            });
 
+            // Local layout update
+            focusVideo.srcObject = screenStream;
+            focusName.innerText = "You (Screen)";
+            focusContainer.classList.remove('hidden');
+            videoAreaGrid.classList.remove('video-grid', 'overflow-y-auto');
+            videoAreaGrid.classList.add('grid-focus-sidebar');
+
+            screenTrack.onended = () => { if (isScreenSharing) stopScreenShare(); };
         } catch (err) {
             console.error("Error sharing screen:", err);
             alert("Could not start screen sharing.");
@@ -423,37 +431,55 @@ async function toggleScreenShare() {
 
 function stopScreenShare() {
     if (!screenStream) return;
-    
-    // Stop the screen share tracks
     screenStream.getTracks().forEach(track => track.stop());
     screenStream = null;
     isScreenSharing = false;
     btnScreenShare.classList.replace('text-blue-500', 'text-gray-300');
 
-    // Revert local video preview back to camera
-    localVideo.srcObject = localStream;
-
-    // Revert track for all active calls back to camera
+    // Revert track for all calls
     const cameraTrack = localStream.getVideoTracks()[0];
-    activeCalls.forEach((call) => {
-        const sender = call.peerConnection.getSenders().find(s => s.track.kind === 'video');
-        if (sender) {
-            sender.replaceTrack(cameraTrack);
+    peersData.forEach(p => {
+        if (p.call) {
+            const sender = p.call.peerConnection.getSenders().find(s => s.track.kind === 'video');
+            if (sender) sender.replaceTrack(cameraTrack);
         }
+        if (p.connection) p.connection.send({type: 'screen-share-stop'});
     });
+
+    // Local layout update
+    focusContainer.classList.add('hidden');
+    focusVideo.srcObject = null;
+    videoAreaGrid.classList.remove('grid-focus-sidebar');
+    videoAreaGrid.classList.add('video-grid', 'overflow-y-auto');
+}
+
+function handleScreenShareStart(peerId) {
+    const peerData = peersData.get(peerId);
+    if (!peerData || !peerData.stream) return;
+    
+    focusVideo.srcObject = peerData.stream;
+    focusName.innerText = peerData.name + " (Screen)";
+    
+    focusContainer.classList.remove('hidden');
+    videoAreaGrid.classList.remove('video-grid', 'overflow-y-auto');
+    videoAreaGrid.classList.add('grid-focus-sidebar');
+}
+
+function handleScreenShareStop(peerId) {
+    focusContainer.classList.add('hidden');
+    focusVideo.srcObject = null;
+    
+    videoAreaGrid.classList.remove('grid-focus-sidebar');
+    videoAreaGrid.classList.add('video-grid', 'overflow-y-auto');
 }
 
 function leaveMeeting() {
-    if (localStream) {
-        localStream.getTracks().forEach(t => t.stop());
-    }
-    if (peer) {
-        peer.destroy();
-    }
+    if (localStream) localStream.getTracks().forEach(t => t.stop());
+    if (peer) peer.destroy();
     window.location.reload();
 }
 
-// === Recording Functionality ===
+// === Recording Functionality (With Audio Mixing) ===
 async function toggleRecording() {
     if (!isAdmin) return;
 
@@ -466,29 +492,45 @@ async function toggleRecording() {
 
 async function startRecording() {
     try {
-        // Request the user to select the screen to share (usually the current tab for meeting recording)
         const displayStream = await navigator.mediaDevices.getDisplayMedia({ 
             video: { cursor: "always" }, 
-            audio: true 
+            audio: true // Attempt to get system audio if possible
         });
 
-        // Try to include microphone audio in the recording
-        let tracks = [...displayStream.getTracks()];
-        if (localStream) {
-            const audioTracks = localStream.getAudioTracks();
-            if(audioTracks.length > 0) {
-                tracks.push(audioTracks[0]);
-            }
+        // Initialize AudioContext to mix all voices
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        audioDestination = audioContext.createMediaStreamDestination();
+
+        // 1. Add Local Mic
+        if (localStream && localStream.getAudioTracks().length > 0) {
+            const localSource = audioContext.createMediaStreamSource(localStream);
+            localSource.connect(audioDestination);
         }
-        
-        const combinedStream = new MediaStream(tracks);
+
+        // 2. Add All Remote Peers
+        peersData.forEach(p => {
+            if (p.stream && p.stream.getAudioTracks().length > 0) {
+                const remoteSource = audioContext.createMediaStreamSource(p.stream);
+                remoteSource.connect(audioDestination);
+            }
+        });
+
+        // 3. Add Screen System Audio (if any)
+        if (displayStream.getAudioTracks().length > 0) {
+            const displaySource = audioContext.createMediaStreamSource(displayStream);
+            displaySource.connect(audioDestination);
+        }
+
+        // Combine the Screen Video Track with the Mixed Audio Track
+        const combinedStream = new MediaStream([
+            displayStream.getVideoTracks()[0],
+            audioDestination.stream.getAudioTracks()[0]
+        ]);
         
         mediaRecorder = new MediaRecorder(combinedStream, { mimeType: 'video/webm' });
         
         mediaRecorder.ondataavailable = function(e) {
-            if (e.data && e.data.size > 0) {
-                recordedChunks.push(e.data);
-            }
+            if (e.data && e.data.size > 0) recordedChunks.push(e.data);
         };
         
         mediaRecorder.onstop = function() {
@@ -498,8 +540,7 @@ async function startRecording() {
             const a = document.createElement('a');
             a.style.display = 'none';
             a.href = url;
-            const filename = `meeting-record-${new Date().getTime()}.webm`;
-            a.download = filename;
+            a.download = `meeting-record-${new Date().getTime()}.webm`;
             document.body.appendChild(a);
             a.click();
             setTimeout(() => {
@@ -508,18 +549,20 @@ async function startRecording() {
             }, 100);
             
             isRecording = false;
-            btnRecord.classList.remove('text-red-500');
-            btnRecord.classList.add('text-gray-300');
+            btnRecord.classList.replace('text-red-500', 'text-gray-300');
             recordingIndicator.classList.add('hidden');
+            
+            if (audioContext) {
+                audioContext.close();
+                audioContext = null;
+            }
         };
         
         mediaRecorder.start();
         isRecording = true;
-        btnRecord.classList.remove('text-gray-300');
-        btnRecord.classList.add('text-red-500');
+        btnRecord.classList.replace('text-gray-300', 'text-red-500');
         recordingIndicator.classList.remove('hidden');
         
-        // Listen for native "Stop sharing" button click in browser
         displayStream.getVideoTracks()[0].onended = () => {
             if(isRecording) stopRecording();
         };
@@ -533,7 +576,6 @@ async function startRecording() {
 function stopRecording() {
     if (mediaRecorder && mediaRecorder.state !== 'inactive') {
         mediaRecorder.stop();
-        // Stop the display tracks
         mediaRecorder.stream.getTracks().forEach(track => track.stop());
     }
 }
