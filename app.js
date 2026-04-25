@@ -24,6 +24,10 @@ const adminControlsHeader = document.getElementById('admin-controls-header');
 const inputInviteLink = document.getElementById('invite-link');
 const btnCopyLink = document.getElementById('btn-copy-link');
 const adminSidebar = document.getElementById('admin-sidebar');
+const btnToggleSidebar = document.getElementById('btn-toggle-sidebar');
+const btnCloseSidebar = document.getElementById('btn-close-sidebar');
+const sidebarBackdrop = document.getElementById('sidebar-backdrop');
+const mobileRequestBadge = document.getElementById('mobile-request-badge');
 const requestsList = document.getElementById('requests-list');
 const requestCount = document.getElementById('request-count');
 const noRequests = document.getElementById('no-requests');
@@ -114,6 +118,32 @@ function setupEventListeners() {
 
     btnRecord.addEventListener('click', toggleRecording);
     btnScreenShare.addEventListener('click', toggleScreenShare);
+
+    // Mobile Sidebar Toggles
+    if (btnToggleSidebar) {
+        btnToggleSidebar.addEventListener('click', () => {
+            adminSidebar.classList.remove('translate-x-full');
+            sidebarBackdrop.classList.remove('hidden', 'opacity-0', 'pointer-events-none');
+            sidebarBackdrop.classList.add('opacity-100', 'pointer-events-auto');
+        });
+    }
+    if (btnCloseSidebar) {
+        btnCloseSidebar.addEventListener('click', closeMobileSidebar);
+    }
+    if (sidebarBackdrop) {
+        sidebarBackdrop.addEventListener('click', closeMobileSidebar);
+    }
+}
+
+function closeMobileSidebar() {
+    adminSidebar.classList.add('translate-x-full');
+    sidebarBackdrop.classList.remove('opacity-100', 'pointer-events-auto');
+    sidebarBackdrop.classList.add('opacity-0', 'pointer-events-none');
+    setTimeout(() => {
+        if (sidebarBackdrop.classList.contains('opacity-0')) {
+            sidebarBackdrop.classList.add('hidden');
+        }
+    }, 300);
 }
 
 // === Admin Functions ===
@@ -132,6 +162,7 @@ async function handleAdminLogin() {
         showScreen('meeting');
         adminControlsHeader.classList.remove('hidden');
         adminSidebar.classList.remove('hidden');
+        if (btnToggleSidebar) btnToggleSidebar.classList.remove('hidden', 'md:hidden');
         btnRecord.classList.remove('hidden');
 
         initializePeer();
@@ -256,6 +287,18 @@ function updateRequestsUI() {
     requestsList.innerHTML = '';
     requestCount.innerText = pendingRequests.size;
     noRequests.classList.toggle('hidden', pendingRequests.size > 0);
+    
+    // Update mobile badge
+    if (mobileRequestBadge) {
+        mobileRequestBadge.innerText = pendingRequests.size;
+        if (pendingRequests.size > 0) {
+            mobileRequestBadge.classList.remove('hidden');
+            if (btnToggleSidebar) btnToggleSidebar.classList.add('animate-bounce');
+            setTimeout(() => { if(btnToggleSidebar) btnToggleSidebar.classList.remove('animate-bounce'); }, 3000);
+        } else {
+            mobileRequestBadge.classList.add('hidden');
+        }
+    }
 
     pendingRequests.forEach((req, peerId) => {
         const div = document.createElement('div');
@@ -424,7 +467,13 @@ async function toggleScreenShare() {
             screenTrack.onended = () => { if (isScreenSharing) stopScreenShare(); };
         } catch (err) {
             console.error("Error sharing screen:", err);
-            alert("Could not start screen sharing.");
+            
+            // Handle mobile/unsupported browser errors gracefully
+            if (err.name === "NotSupportedError" || err.message.includes("supported") || /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)) {
+                alert("দুঃখিত, মোবাইল ব্রাউজার থেকে সরাসরি স্ক্রিন শেয়ার করা সম্ভব নয়। স্ক্রিন শেয়ারিং শুধুমাত্র কম্পিউটার বা ল্যাপটপ থেকে কাজ করে।");
+            } else {
+                alert("Could not start screen sharing. Permission denied or not supported.");
+            }
         }
     }
 }
