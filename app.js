@@ -188,8 +188,19 @@ async function handleUserJoinRequest() {
 }
 
 // === Peer Initialization (Mesh) ===
+const peerConfig = {
+    config: {
+        'iceServers': [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' },
+            { urls: 'stun:stun2.l.google.com:19302' }
+        ]
+    }
+};
+
 function initializePeer() {
-    peer = new Peer(isAdmin ? ('meet-' + Math.random().toString(36).substr(2, 9)) : undefined);
+    const peerId = isAdmin ? ('meet-' + Math.random().toString(36).substr(2, 9)) : undefined;
+    peer = new Peer(peerId, peerConfig);
 
     peer.on('open', (id) => {
         console.log('My Peer ID:', id);
@@ -214,6 +225,12 @@ function initializePeer() {
             // New join request
             pendingRequests.set(conn.peer, {name: remoteName, conn});
             updateRequestsUI();
+            
+            // If they close the tab while waiting
+            conn.on('close', () => {
+                pendingRequests.delete(conn.peer);
+                updateRequestsUI();
+            });
         } else {
             // Full Mesh: peer connecting directly
             if (!peersData.has(conn.peer)) {
@@ -263,7 +280,11 @@ function setupConnectionListeners(conn) {
 }
 
 function setupCallListeners(call, name) {
-    const pData = peersData.get(call.peer);
+    let pData = peersData.get(call.peer);
+    if (!pData) {
+        pData = {name: name};
+        peersData.set(call.peer, pData);
+    }
     pData.call = call;
 
     call.on('stream', stream => {
@@ -326,6 +347,10 @@ window.approveUser = function(peerId) {
 
     req.conn.send({ type: 'approved', peers: currentPeers });
     
+    // Attach connection listeners now that they are approved
+    setupConnectionListeners(req.conn);
+    peersData.set(peerId, {name: req.name, connection: req.conn});
+    
     // Broadcast new user to existing peers
     peersData.forEach((d, id) => {
         if (d.connection && id !== peerId && id !== adminPeerId) {
@@ -333,9 +358,14 @@ window.approveUser = function(peerId) {
         }
     });
 
-    peersData.set(peerId, {name: req.name, connection: req.conn});
     pendingRequests.delete(peerId);
     updateRequestsUI();
+
+    // Admin initiates Media Call to the new user directly for highest reliability
+    setTimeout(() => {
+        const call = peer.call(peerId, localStream, {metadata: {name: myName}});
+        setupCallListeners(call, req.name);
+    }, 500);
 };
 
 window.rejectUser = function(peerId) {
@@ -352,20 +382,24 @@ window.rejectUser = function(peerId) {
 function handleApproved(roomPeers) {
     showScreen('meeting');
     
-    // Call Admin
-    const adminCall = peer.call(adminPeerId, localStream, {metadata: {name: myName}});
-    setupCallListeners(adminCall, "Host");
-
-    // Connect & Call other peers in the room
+    // Admin will call us, so we just wait for Admin's call.
+    // However, we need to call other existing peers in the room.
     roomPeers.forEach(p => {
         // Connect Data
         const conn = peer.connect(p.id, {metadata: {name: myName}});
-        peersData.set(p.id, {name: p.name, connection: conn});
+        let pData = peersData.get(p.id);
+        if (!pData) {
+            pData = {name: p.name};
+            peersData.set(p.id, pData);
+        }
+        pData.connection = conn;
         setupConnectionListeners(conn);
         
         // Connect Media
-        const call = peer.call(p.id, localStream, {metadata: {name: myName}});
-        setupCallListeners(call, p.name);
+        setTimeout(() => {
+            const call = peer.call(p.id, localStream, {metadata: {name: myName}});
+            setupCallListeners(call, p.name);
+        }, 500);
     });
 }
 
