@@ -28,6 +28,7 @@ const requestsList = document.getElementById('requests-list');
 const requestCount = document.getElementById('request-count');
 const noRequests = document.getElementById('no-requests');
 const btnRecord = document.getElementById('btn-record');
+const btnScreenShare = document.getElementById('btn-screen-share');
 const recordingIndicator = document.getElementById('recording-indicator');
 
 // Meeting Controls
@@ -52,10 +53,12 @@ const activeCalls = new Map(); // peerId -> call
 let myName = "";
 let adminConnection = null;
 
-// Recording state
+// Recording & Screen Share state
 let mediaRecorder = null;
 let recordedChunks = [];
 let isRecording = false;
+let isScreenSharing = false;
+let screenStream = null;
 
 // === Initialization ===
 function init() {
@@ -124,6 +127,7 @@ function setupEventListeners() {
     });
 
     btnRecord.addEventListener('click', toggleRecording);
+    btnScreenShare.addEventListener('click', toggleScreenShare);
 }
 
 // === Admin Functions ===
@@ -145,6 +149,7 @@ async function handleAdminLogin() {
         adminControlsHeader.classList.remove('hidden');
         adminSidebar.classList.remove('hidden');
         btnRecord.classList.remove('hidden');
+        btnScreenShare.classList.remove('hidden');
 
         initializeAdminPeer();
     } else {
@@ -369,11 +374,73 @@ function toggleVideo() {
         videoTrack.enabled = false;
         btnToggleVideo.innerHTML = '<i class="fa-solid fa-video-slash"></i>';
         btnToggleVideo.classList.replace('bg-gray-700', 'bg-red-600');
+        localVideo.style.opacity = '0.3'; // Visual feedback for user
     } else {
         videoTrack.enabled = true;
         btnToggleVideo.innerHTML = '<i class="fa-solid fa-video"></i>';
         btnToggleVideo.classList.replace('bg-red-600', 'bg-gray-700');
+        localVideo.style.opacity = '1';
     }
+}
+
+async function toggleScreenShare() {
+    if (!isAdmin) return;
+
+    if (isScreenSharing) {
+        // Stop screen share and revert to camera
+        stopScreenShare();
+    } else {
+        // Start screen share
+        try {
+            screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+            const screenTrack = screenStream.getVideoTracks()[0];
+            
+            // Replace local video preview
+            localVideo.srcObject = screenStream;
+            
+            // Replace track for all active calls
+            activeCalls.forEach((call) => {
+                const sender = call.peerConnection.getSenders().find(s => s.track.kind === 'video');
+                if (sender) {
+                    sender.replaceTrack(screenTrack);
+                }
+            });
+
+            isScreenSharing = true;
+            btnScreenShare.classList.replace('text-gray-300', 'text-blue-500');
+
+            // Handle browser's native "Stop sharing" button
+            screenTrack.onended = () => {
+                if (isScreenSharing) stopScreenShare();
+            };
+
+        } catch (err) {
+            console.error("Error sharing screen:", err);
+            alert("Could not start screen sharing.");
+        }
+    }
+}
+
+function stopScreenShare() {
+    if (!screenStream) return;
+    
+    // Stop the screen share tracks
+    screenStream.getTracks().forEach(track => track.stop());
+    screenStream = null;
+    isScreenSharing = false;
+    btnScreenShare.classList.replace('text-blue-500', 'text-gray-300');
+
+    // Revert local video preview back to camera
+    localVideo.srcObject = localStream;
+
+    // Revert track for all active calls back to camera
+    const cameraTrack = localStream.getVideoTracks()[0];
+    activeCalls.forEach((call) => {
+        const sender = call.peerConnection.getSenders().find(s => s.track.kind === 'video');
+        if (sender) {
+            sender.replaceTrack(cameraTrack);
+        }
+    });
 }
 
 function leaveMeeting() {

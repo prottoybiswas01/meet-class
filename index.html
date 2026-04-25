@@ -140,19 +140,23 @@
 
         <!-- Bottom Control Bar -->
         <footer class="bg-gray-800 p-4 flex justify-center gap-6 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)]">
-            <button id="btn-toggle-audio" class="w-12 h-12 rounded-full bg-gray-700 hover:bg-gray-600 text-white flex items-center justify-center transition focus:outline-none">
+            <button id="btn-toggle-audio" class="w-12 h-12 rounded-full bg-gray-700 hover:bg-gray-600 text-white flex items-center justify-center transition focus:outline-none" title="Toggle Microphone">
                 <i class="fa-solid fa-microphone"></i>
             </button>
-            <button id="btn-toggle-video" class="w-12 h-12 rounded-full bg-gray-700 hover:bg-gray-600 text-white flex items-center justify-center transition focus:outline-none">
+            <button id="btn-toggle-video" class="w-12 h-12 rounded-full bg-gray-700 hover:bg-gray-600 text-white flex items-center justify-center transition focus:outline-none" title="Toggle Camera">
                 <i class="fa-solid fa-video"></i>
             </button>
             
-            <!-- Admin Only Record Button -->
-            <button id="btn-record" class="hidden w-12 h-12 rounded-full bg-gray-700 hover:bg-red-600 hover:text-white text-gray-300 flex items-center justify-center transition focus:outline-none group relative">
+            <!-- Admin Only Buttons -->
+            <button id="btn-screen-share" class="hidden w-12 h-12 rounded-full bg-gray-700 hover:bg-blue-600 hover:text-white text-gray-300 flex items-center justify-center transition focus:outline-none" title="Share Screen">
+                <i class="fa-solid fa-display"></i>
+            </button>
+            
+            <button id="btn-record" class="hidden w-12 h-12 rounded-full bg-gray-700 hover:bg-red-600 hover:text-white text-gray-300 flex items-center justify-center transition focus:outline-none group relative" title="Record Meeting">
                 <i class="fa-solid fa-record-vinyl group-hover:animate-spin"></i>
             </button>
             
-            <button id="btn-leave" class="w-12 h-12 rounded-full bg-red-600 hover:bg-red-700 text-white flex items-center justify-center transition focus:outline-none">
+            <button id="btn-leave" class="w-12 h-12 rounded-full bg-red-600 hover:bg-red-700 text-white flex items-center justify-center transition focus:outline-none" title="Leave Meeting">
                 <i class="fa-solid fa-phone-slash"></i>
             </button>
         </footer>
