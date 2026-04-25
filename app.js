@@ -11,6 +11,8 @@ const inputJoinName = document.getElementById('join-name');
 const btnRequestJoin = document.getElementById('btn-request-join');
 const joinError = document.getElementById('join-error');
 const btnShowAdminLogin = document.getElementById('btn-show-admin-login');
+const permissionModal = document.getElementById('permission-modal');
+const btnClosePermission = document.getElementById('btn-close-permission');
 
 // Admin Login
 const inputAdminId = document.getElementById('admin-id');
@@ -91,7 +93,11 @@ async function startLocalVideo() {
         return true;
     } catch (err) {
         console.error("Error accessing media devices.", err);
-        alert("Could not access camera and microphone.");
+        if (err.name === 'NotAllowedError' || err.name === 'NotFoundError') {
+            permissionModal.classList.remove('hidden-section');
+        } else {
+            alert("Could not access camera and microphone.");
+        }
         return false;
     }
 }
@@ -108,6 +114,12 @@ function setupEventListeners() {
     btnToggleAudio.addEventListener('click', toggleAudio);
     btnToggleVideo.addEventListener('click', toggleVideo);
     btnLeave.addEventListener('click', leaveMeeting);
+    
+    if (btnClosePermission) {
+        btnClosePermission.addEventListener('click', () => {
+            permissionModal.classList.add('hidden-section');
+        });
+    }
 
     btnCopyLink.addEventListener('click', () => {
         inputInviteLink.select();

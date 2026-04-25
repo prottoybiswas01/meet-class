@@ -99,6 +99,24 @@
         <p class="text-gray-400">Please wait. The meeting admin will approve your request shortly.</p>
     </div>
 
+    <!-- 4. Permission Error Modal -->
+    <div id="permission-modal" class="hidden-section fixed inset-0 bg-black/80 flex items-center justify-center z-[100] p-4">
+        <div class="bg-white p-6 md:p-8 rounded-xl shadow-2xl w-full max-w-md text-gray-800 text-center relative">
+            <div class="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4 text-red-500 text-3xl">
+                <i class="fa-solid fa-microphone-lines-slash"></i>
+            </div>
+            <h2 class="text-xl md:text-2xl font-bold mb-3 text-gray-900">ক্যামেরা ও মাইক্রোফোন ব্লক করা আছে!</h2>
+            <p class="text-sm md:text-base text-gray-600 mb-6 leading-relaxed">
+                আপনার ব্রাউজার থেকে ক্যামেরা এবং মাইক্রোফোনের পারমিশন বন্ধ (Block) করা আছে। মিটিংয়ে জয়েন করতে হলে এগুলোর পারমিশন অন করতে হবে। 
+                <br><br>
+                দয়া করে ব্রাউজারের ওপরের দিকে অ্যাড্রেস বারের বাম পাশে <strong>লক (Lock 🔒)</strong> আইকনে ক্লিক করে পারমিশনগুলো <strong>Allow</strong> করুন এবং পেজটি রিলোড দিন।
+            </p>
+            <div class="flex gap-4">
+                <button id="btn-close-permission" class="w-full bg-brand-600 hover:bg-brand-500 text-white font-bold py-3 px-4 rounded transition">ঠিক আছে</button>
+            </div>
+        </div>
+    </div>
+
     <!-- 4. Main Meeting / Admin Dashboard -->
     <div id="meeting-screen" class="hidden-section flex-1 flex flex-col bg-gray-900 text-white h-full relative">
         
