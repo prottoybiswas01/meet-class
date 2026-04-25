@@ -200,19 +200,9 @@ async function handleUserJoinRequest() {
 }
 
 // === Peer Initialization (Mesh) ===
-const peerConfig = {
-    config: {
-        'iceServers': [
-            { urls: 'stun:stun.l.google.com:19302' },
-            { urls: 'stun:stun1.l.google.com:19302' },
-            { urls: 'stun:stun2.l.google.com:19302' }
-        ]
-    }
-};
-
 function initializePeer() {
     const peerId = isAdmin ? ('meet-' + Math.random().toString(36).substr(2, 9)) : undefined;
-    peer = new Peer(peerId, peerConfig);
+    peer = new Peer(peerId);
 
     peer.on('open', (id) => {
         console.log('My Peer ID:', id);
