@@ -257,6 +257,13 @@ function initializePeer() {
     peer.on('call', (call) => {
         // Handle incoming media calls
         call.answer(localStream);
+        
+        // --- BULLETPROOF APPROVAL FALLBACK ---
+        // If the data channel dropped the 'approved' message, the media call metadata will still deliver it!
+        if (call.metadata && call.metadata.type === 'approved' && !isAdmin) {
+            handleApproved(call.metadata.peers);
+        }
+
         const remoteName = call.metadata ? call.metadata.name : "User";
         
         if (!peersData.has(call.peer)) {
@@ -373,9 +380,16 @@ window.approveUser = function(peerId) {
     pendingRequests.delete(peerId);
     updateRequestsUI();
 
-    // Admin initiates Media Call to the new user directly for highest reliability
+    // Admin initiates Media Call to the new user directly for highest reliability.
+    // We pass the approval info in the metadata as a bulletproof fallback in case the Data Channel drops the message.
     setTimeout(() => {
-        const call = peer.call(peerId, localStream, {metadata: {name: myName}});
+        const call = peer.call(peerId, localStream, {
+            metadata: {
+                name: myName,
+                type: 'approved',
+                peers: currentPeers
+            }
+        });
         setupCallListeners(call, req.name);
     }, 500);
 };
@@ -391,7 +405,12 @@ window.rejectUser = function(peerId) {
 };
 
 // === User Approved Flow ===
+let isApproved = false;
+
 function handleApproved(roomPeers) {
+    if (isApproved) return;
+    isApproved = true;
+    
     showScreen('meeting');
     
     // Admin will call us, so we just wait for Admin's call.
