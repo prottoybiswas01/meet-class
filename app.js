@@ -245,9 +245,33 @@ async function handleUserJoinRequest() {
 }
 
 // === Peer Initialization (Mesh) ===
+const peerConfig = {
+    config: {
+        'iceServers': [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' },
+            {
+                urls: 'turn:openrelay.metered.ca:80',
+                username: 'openrelayproject',
+                credential: 'openrelayproject'
+            },
+            {
+                urls: 'turn:openrelay.metered.ca:443',
+                username: 'openrelayproject',
+                credential: 'openrelayproject'
+            },
+            {
+                urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+                username: 'openrelayproject',
+                credential: 'openrelayproject'
+            }
+        ]
+    }
+};
+
 function initializePeer() {
     const peerId = isAdmin ? ('meet-' + Math.random().toString(36).substr(2, 9)) : undefined;
-    peer = new Peer(peerId);
+    peer = new Peer(peerId, peerConfig);
 
     peer.on('open', (id) => {
         console.log('My Peer ID:', id);
@@ -498,6 +522,11 @@ function addVideoStream(id, stream, name) {
     video.srcObject = stream;
     video.autoplay = true;
     video.playsInline = true;
+    
+    // Explicitly play video to prevent mobile browsers from freezing the first frame
+    video.onloadedmetadata = () => {
+        video.play().catch(e => console.error("Auto-play prevented by browser:", e));
+    };
 
     const label = document.createElement('div');
     label.className = 'name-label';
