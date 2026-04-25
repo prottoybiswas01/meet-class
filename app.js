@@ -14,6 +14,12 @@ const btnShowAdminLogin = document.getElementById('btn-show-admin-login');
 const permissionModal = document.getElementById('permission-modal');
 const btnClosePermission = document.getElementById('btn-close-permission');
 
+// Preview Section
+const previewSection = document.getElementById('preview-section');
+const previewVideo = document.getElementById('preview-video');
+const btnPreviewAudio = document.getElementById('btn-preview-audio');
+const btnPreviewVideo = document.getElementById('btn-preview-video');
+
 // Admin Login
 const inputAdminId = document.getElementById('admin-id');
 const inputAdminPass = document.getElementById('admin-pass');
@@ -65,6 +71,7 @@ let recordedChunks = [];
 let isRecording = false;
 let isScreenSharing = false;
 let screenStream = null;
+let currentSharer = null;
 
 let audioContext;
 let audioDestination;
@@ -75,6 +82,12 @@ function init() {
     if (hash) {
         adminPeerId = hash;
         btnShowAdminLogin.classList.add('hidden');
+        
+        // Show preview and start camera immediately for privacy check before joining
+        if (previewSection) {
+            previewSection.classList.remove('hidden');
+            startLocalVideo();
+        }
     }
     setupEventListeners();
 }
@@ -87,9 +100,25 @@ function showScreen(screenName) {
 }
 
 async function startLocalVideo() {
+    if (localStream) return true; // Already started via preview
+    
     try {
-        localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        // Optimize for global/weak networks: Limit resolution to 480p and enable audio optimizations
+        const constraints = {
+            video: {
+                width: { ideal: 640, max: 1280 },
+                height: { ideal: 480, max: 720 },
+                frameRate: { ideal: 24, max: 30 }
+            },
+            audio: {
+                echoCancellation: true,
+                noiseSuppression: true,
+                autoGainControl: true
+            }
+        };
+        localStream = await navigator.mediaDevices.getUserMedia(constraints);
         localVideo.srcObject = localStream;
+        if (previewVideo) previewVideo.srcObject = localStream;
         return true;
     } catch (err) {
         console.error("Error accessing media devices.", err);
@@ -100,6 +129,18 @@ async function startLocalVideo() {
         }
         return false;
     }
+}
+
+function getActiveStream() {
+    if (isScreenSharing && screenStream) {
+        // Return a combined stream: Screen Video + Local Audio
+        const tracks = [screenStream.getVideoTracks()[0]];
+        if (localStream && localStream.getAudioTracks().length > 0) {
+            tracks.push(localStream.getAudioTracks()[0]);
+        }
+        return new MediaStream(tracks);
+    }
+    return localStream;
 }
 
 // === Event Listeners ===
@@ -114,6 +155,10 @@ function setupEventListeners() {
     btnToggleAudio.addEventListener('click', toggleAudio);
     btnToggleVideo.addEventListener('click', toggleVideo);
     btnLeave.addEventListener('click', leaveMeeting);
+    
+    // Preview Buttons
+    if (btnPreviewAudio) btnPreviewAudio.addEventListener('click', toggleAudio);
+    if (btnPreviewVideo) btnPreviewVideo.addEventListener('click', toggleVideo);
     
     if (btnClosePermission) {
         btnClosePermission.addEventListener('click', () => {
@@ -244,15 +289,25 @@ function initializePeer() {
         }
     });
 
+    peer.on('error', (err) => {
+        console.error("PeerJS Error:", err);
+        if (err.type === 'peer-unavailable') {
+            alert("মিটিংটি শেষ হয়ে গেছে অথবা অ্যাডমিন এই মুহূর্তে অফলাইনে আছেন। (Admin is offline)");
+            window.location.reload();
+        } else if (err.type === 'network' || err.type === 'disconnected') {
+            console.warn("Network issue detected.");
+        }
+    });
+
     peer.on('call', (call) => {
-        // Handle incoming media calls
-        call.answer(localStream);
-        
         // --- BULLETPROOF APPROVAL FALLBACK ---
         // If the data channel dropped the 'approved' message, the media call metadata will still deliver it!
         if (call.metadata && call.metadata.type === 'approved' && !isAdmin) {
             handleApproved(call.metadata.peers);
         }
+
+        // Handle incoming media calls using the current active stream (camera or screen share)
+        call.answer(getActiveStream());
 
         const remoteName = call.metadata ? call.metadata.name : "User";
         
@@ -373,7 +428,7 @@ window.approveUser = function(peerId) {
     // Admin initiates Media Call to the new user directly for highest reliability.
     // We pass the approval info in the metadata as a bulletproof fallback in case the Data Channel drops the message.
     setTimeout(() => {
-        const call = peer.call(peerId, localStream, {
+        const call = peer.call(peerId, getActiveStream(), {
             metadata: {
                 name: myName,
                 type: 'approved',
@@ -418,7 +473,7 @@ function handleApproved(roomPeers) {
         
         // Connect Media
         setTimeout(() => {
-            const call = peer.call(p.id, localStream, {metadata: {name: myName}});
+            const call = peer.call(p.id, getActiveStream(), {metadata: {name: myName}});
             setupCallListeners(call, p.name);
         }, 500);
     });
@@ -426,9 +481,16 @@ function handleApproved(roomPeers) {
 
 // === Shared Video & Controls Functions ===
 function addVideoStream(id, stream, name) {
-    if (document.getElementById(`video-container-${id}`)) return;
+    let container = document.getElementById(`video-container-${id}`);
+    
+    if (container) {
+        // If container exists but stream changed (e.g. they reconnected quickly)
+        const video = container.querySelector('video');
+        if (video.srcObject !== stream) video.srcObject = stream;
+        return;
+    }
 
-    const container = document.createElement('div');
+    container = document.createElement('div');
     container.id = `video-container-${id}`;
     container.className = 'video-container shadow-lg';
 
@@ -464,10 +526,18 @@ function toggleAudio() {
         audioTrack.enabled = false;
         btnToggleAudio.innerHTML = '<i class="fa-solid fa-microphone-slash"></i>';
         btnToggleAudio.classList.replace('bg-gray-700', 'bg-red-600');
+        if (btnPreviewAudio) {
+            btnPreviewAudio.innerHTML = '<i class="fa-solid fa-microphone-slash"></i>';
+            btnPreviewAudio.classList.replace('bg-gray-700', 'bg-red-600');
+        }
     } else {
         audioTrack.enabled = true;
         btnToggleAudio.innerHTML = '<i class="fa-solid fa-microphone"></i>';
         btnToggleAudio.classList.replace('bg-red-600', 'bg-gray-700');
+        if (btnPreviewAudio) {
+            btnPreviewAudio.innerHTML = '<i class="fa-solid fa-microphone"></i>';
+            btnPreviewAudio.classList.replace('bg-red-600', 'bg-gray-700');
+        }
     }
 }
 
@@ -479,11 +549,21 @@ function toggleVideo() {
         btnToggleVideo.innerHTML = '<i class="fa-solid fa-video-slash"></i>';
         btnToggleVideo.classList.replace('bg-gray-700', 'bg-red-600');
         localVideo.style.opacity = '0.3';
+        if (btnPreviewVideo) {
+            btnPreviewVideo.innerHTML = '<i class="fa-solid fa-video-slash"></i>';
+            btnPreviewVideo.classList.replace('bg-gray-700', 'bg-red-600');
+            previewVideo.style.opacity = '0.3';
+        }
     } else {
         videoTrack.enabled = true;
         btnToggleVideo.innerHTML = '<i class="fa-solid fa-video"></i>';
         btnToggleVideo.classList.replace('bg-red-600', 'bg-gray-700');
         localVideo.style.opacity = '1';
+        if (btnPreviewVideo) {
+            btnPreviewVideo.innerHTML = '<i class="fa-solid fa-video"></i>';
+            btnPreviewVideo.classList.replace('bg-red-600', 'bg-gray-700');
+            previewVideo.style.opacity = '1';
+        }
     }
 }
 
@@ -493,7 +573,14 @@ async function toggleScreenShare() {
         stopScreenShare();
     } else {
         try {
-            screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+            // Optimize screen share bandwidth by capping framerate
+            const displayConstraints = {
+                video: {
+                    frameRate: { ideal: 15, max: 30 }
+                },
+                audio: false
+            };
+            screenStream = await navigator.mediaDevices.getDisplayMedia(displayConstraints);
             const screenTrack = screenStream.getVideoTracks()[0];
             
             // Replace track for all active calls
@@ -505,6 +592,7 @@ async function toggleScreenShare() {
             });
 
             isScreenSharing = true;
+            currentSharer = 'local';
             btnScreenShare.classList.replace('text-gray-300', 'text-blue-500');
 
             // Broadcast
@@ -538,6 +626,7 @@ function stopScreenShare() {
     screenStream.getTracks().forEach(track => track.stop());
     screenStream = null;
     isScreenSharing = false;
+    if (currentSharer === 'local') currentSharer = null;
     btnScreenShare.classList.replace('text-blue-500', 'text-gray-300');
 
     // Revert track for all calls
@@ -561,6 +650,7 @@ function handleScreenShareStart(peerId) {
     const peerData = peersData.get(peerId);
     if (!peerData || !peerData.stream) return;
     
+    currentSharer = peerId;
     focusVideo.srcObject = peerData.stream;
     focusName.innerText = peerData.name + " (Screen)";
     
@@ -570,6 +660,10 @@ function handleScreenShareStart(peerId) {
 }
 
 function handleScreenShareStop(peerId) {
+    // Only close focus if the person stopping is the one currently in focus
+    if (currentSharer !== peerId) return;
+    
+    currentSharer = null;
     focusContainer.classList.add('hidden');
     focusVideo.srcObject = null;
     

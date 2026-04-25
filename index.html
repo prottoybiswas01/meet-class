@@ -49,8 +49,21 @@
 <body class="h-screen w-screen flex flex-col text-gray-800">
 
     <!-- 1. Landing / Entry Screen -->
-    <div id="landing-screen" class="flex-1 flex items-center justify-center bg-gray-900 text-white">
-        <div class="bg-gray-800 p-8 rounded-xl shadow-2xl w-full max-w-md text-center">
+    <div id="landing-screen" class="flex-1 flex flex-col md:flex-row items-center justify-center bg-gray-900 text-white p-4 gap-8">
+        
+        <!-- Pre-Join Preview Area (Visible when joining via link) -->
+        <div id="preview-section" class="hidden w-full max-w-lg flex flex-col gap-4">
+            <div class="relative bg-black rounded-xl overflow-hidden aspect-[4/3] shadow-2xl border border-gray-700">
+                <video id="preview-video" autoplay playsinline muted class="w-full h-full object-cover transform scale-x-[-1]"></video>
+                <div class="absolute bottom-4 left-0 right-0 flex justify-center gap-4 z-10">
+                    <button id="btn-preview-audio" class="bg-gray-700 hover:bg-gray-600 w-12 h-12 rounded-full text-white shadow-lg transition border border-gray-500/50"><i class="fa-solid fa-microphone"></i></button>
+                    <button id="btn-preview-video" class="bg-gray-700 hover:bg-gray-600 w-12 h-12 rounded-full text-white shadow-lg transition border border-gray-500/50"><i class="fa-solid fa-video"></i></button>
+                </div>
+            </div>
+            <p class="text-center text-gray-400 text-sm">জয়েন করার আগে আপনার ক্যামেরা ও মাইক্রোফোন চেক করে নিন।</p>
+        </div>
+
+        <div class="bg-gray-800 p-8 rounded-xl shadow-2xl w-full max-w-md text-center border border-gray-700">
             <h1 class="text-3xl font-bold mb-6 flex justify-center items-center gap-2">
                 <i class="fa-solid fa-video text-brand-500"></i> Meet App
             </h1>
