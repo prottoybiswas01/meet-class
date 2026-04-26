@@ -25,9 +25,9 @@
     <!-- Custom CSS for specific styling -->
     <style>
         body { font-family: 'Inter', sans-serif; background-color: #f3f4f6; }
-        .video-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; align-content: start; }
+        .video-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; align-content: center; }
         @media (max-width: 640px) {
-            .video-grid { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.5rem; }
+            .video-grid { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0.5rem; align-content: center; }
         }
         .video-container { position: relative; background: #000; border-radius: 0.5rem; overflow: hidden; aspect-ratio: 16/9; transition: all 0.3s ease; }
         video { width: 100%; height: 100%; object-fit: cover; }
@@ -142,10 +142,10 @@
                 </h1>
                 
                 <!-- Admin specific info -->
-                <div id="admin-controls-header" class="hidden bg-gray-700 px-2 md:px-4 py-2 rounded-lg flex items-center gap-2 md:gap-3 max-w-[200px] md:max-w-none">
+                <div id="admin-controls-header" class="hidden bg-gray-700 px-2 md:px-4 py-2 rounded-lg flex items-center gap-2 md:gap-3">
                     <span class="text-xs md:text-sm text-gray-300 hidden md:inline">Invite Link:</span>
-                    <input type="text" id="invite-link" readonly class="bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs md:text-sm text-gray-300 w-24 md:w-64 focus:outline-none truncate">
-                    <button id="btn-copy-link" class="text-brand-500 hover:text-brand-400 transition"><i class="fa-regular fa-copy"></i></button>
+                    <input type="text" id="invite-link" readonly class="hidden md:block bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm text-gray-300 w-64 focus:outline-none truncate">
+                    <button id="btn-copy-link" class="text-brand-500 hover:text-brand-400 transition text-sm flex items-center gap-1 font-medium"><i class="fa-regular fa-copy"></i> <span class="hidden md:inline">Copy</span></button>
                 </div>
             </div>
 
@@ -206,7 +206,7 @@
         </main>
 
         <!-- Bottom Control Bar -->
-        <footer class="bg-gray-800 p-3 md:p-4 flex justify-center gap-3 md:gap-6 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] flex-wrap">
+        <footer class="bg-gray-800 p-2 md:p-4 flex justify-center gap-2 md:gap-6 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] flex-wrap w-full z-20">
             <button id="btn-toggle-audio" class="w-10 h-10 md:w-12 md:h-12 rounded-full bg-gray-700 hover:bg-gray-600 text-white flex items-center justify-center transition focus:outline-none" title="Toggle Microphone">
                 <i class="fa-solid fa-microphone text-sm md:text-base"></i>
             </button>
