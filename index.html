@@ -136,7 +136,10 @@
         <!-- Header / Admin Controls -->
         <header class="bg-gray-800 p-4 flex justify-between items-center shadow-md z-20 relative">
             <div class="flex items-center gap-2 md:gap-4">
-                <h1 class="text-lg md:text-xl font-bold flex items-center gap-2"><i class="fa-solid fa-video text-brand-500"></i> <span class="hidden md:inline">Meet</span></h1>
+                <h1 class="text-lg md:text-xl font-bold flex items-center gap-2">
+                    <i class="fa-solid fa-video text-brand-500"></i> <span class="hidden md:inline">Meet</span>
+                    <span id="active-users-badge" class="hidden ml-2 text-xs bg-brand-600 px-2 py-1 rounded-full text-white font-medium shadow flex items-center gap-1"><i class="fa-solid fa-users"></i> <span id="active-count">1</span></span>
+                </h1>
                 
                 <!-- Admin specific info -->
                 <div id="admin-controls-header" class="hidden bg-gray-700 px-2 md:px-4 py-2 rounded-lg flex items-center gap-2 md:gap-3 max-w-[200px] md:max-w-none">

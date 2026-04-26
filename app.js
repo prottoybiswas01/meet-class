@@ -363,6 +363,11 @@ function setupConnectionListeners(conn) {
             handleScreenShareStart(conn.peer);
         } else if (data.type === 'screen-share-stop') {
             handleScreenShareStop(conn.peer);
+        } else if (data.type === 'force-toggle-mute') {
+            toggleAudio();
+        } else if (data.type === 'kick') {
+            alert("আপনাকে মিটিং থেকে বের করে দেওয়া হয়েছে। (You have been kicked by the host)");
+            window.location.reload();
         }
     });
 
@@ -474,6 +479,30 @@ window.rejectUser = function(peerId) {
     }
 };
 
+window.kickUser = function(peerId) {
+    if (!isAdmin) return;
+    const pData = peersData.get(peerId);
+    if (pData && pData.connection) {
+        pData.connection.send({ type: 'kick' });
+        setTimeout(() => {
+            if (pData.call) pData.call.close();
+            if (pData.connection) pData.connection.close();
+            removeUser(peerId);
+        }, 500);
+    }
+};
+
+function updateActiveCount() {
+    const activeUsersBadge = document.getElementById('active-users-badge');
+    const activeCountEl = document.getElementById('active-count');
+    if (activeUsersBadge && activeCountEl) {
+        activeUsersBadge.classList.remove('hidden');
+        // Count all video containers in the grid
+        const count = document.querySelectorAll('#video-grid .video-container').length;
+        activeCountEl.innerText = count;
+    }
+}
+
 // === User Approved Flow ===
 let isApproved = false;
 
@@ -548,15 +577,47 @@ function addVideoStream(id, stream, name) {
     label.className = 'name-label';
     label.innerText = name;
 
+    if (isAdmin && id !== adminPeerId) {
+        const controls = document.createElement('div');
+        controls.className = 'absolute top-2 right-2 flex gap-2 z-20 opacity-0 transition-opacity duration-300 group-hover:opacity-100';
+        
+        const muteBtn = document.createElement('button');
+        muteBtn.className = 'bg-gray-700 hover:bg-gray-600 w-8 h-8 rounded-full text-white shadow focus:outline-none';
+        muteBtn.innerHTML = '<i class="fa-solid fa-microphone-slash"></i>';
+        muteBtn.title = 'Toggle Mute';
+        muteBtn.onclick = () => {
+            const pData = peersData.get(id);
+            if(pData && pData.connection) {
+                pData.connection.send({ type: 'force-toggle-mute' });
+                muteBtn.classList.replace('bg-gray-700', 'bg-red-500');
+                setTimeout(() => muteBtn.classList.replace('bg-red-500', 'bg-gray-700'), 300);
+            }
+        };
+        
+        const kickBtn = document.createElement('button');
+        kickBtn.className = 'bg-red-600 hover:bg-red-700 w-8 h-8 rounded-full text-white shadow focus:outline-none';
+        kickBtn.innerHTML = '<i class="fa-solid fa-right-from-bracket"></i>';
+        kickBtn.title = 'Kick User';
+        kickBtn.onclick = () => window.kickUser(id);
+        
+        controls.appendChild(muteBtn);
+        controls.appendChild(kickBtn);
+        container.appendChild(controls);
+        container.classList.add('group'); // Enable group-hover
+    }
+
     container.appendChild(video);
     container.appendChild(label);
     videoAreaGrid.appendChild(container);
+    updateActiveCount();
 }
 
 function removeUser(id) {
     const el = document.getElementById(`video-container-${id}`);
     if (el) el.remove();
     peersData.delete(id);
+    
+    updateActiveCount();
     
     if (id === adminPeerId && !isAdmin) {
         alert("Meeting ended by host.");
