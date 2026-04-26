@@ -51,14 +51,17 @@ const focusName = document.getElementById('focus-name');
 const localVideo = document.getElementById('local-video');
 const btnToggleAudio = document.getElementById('btn-toggle-audio');
 const btnToggleVideo = document.getElementById('btn-toggle-video');
+const btnRaiseHand = document.getElementById('btn-raise-hand');
 const btnLeave = document.getElementById('btn-leave');
 
 // === State ===
 let isAdmin = false;
+let isCoHost = false;
 let peer = null;
 let localStream = null;
 let adminPeerId = null;
 let myName = "";
+let isHandRaised = false;
 
 // Full Mesh state
 // peerId -> { name, connection, call, stream }
@@ -171,6 +174,7 @@ function setupEventListeners() {
 
     btnRecord.addEventListener('click', toggleRecording);
     btnScreenShare.addEventListener('click', toggleScreenShare);
+    btnRaiseHand.addEventListener('click', toggleRaiseHand);
 
     // Mobile Sidebar Toggles
     if (btnToggleSidebar) {
@@ -368,6 +372,29 @@ function setupConnectionListeners(conn) {
         } else if (data.type === 'kick') {
             alert("আপনাকে মিটিং থেকে বের করে দেওয়া হয়েছে। (You have been kicked by the host)");
             window.location.reload();
+        } else if (data.type === 'hand-toggle') {
+            toggleHandIcon(conn.peer, data.isRaised);
+        } else if (data.type === 'make-cohost') {
+            isCoHost = true;
+            alert("You are now a Co-Host!");
+            btnRecord.classList.remove('hidden'); // Co-Hosts can also record (via main host)
+            // Re-render admin controls for existing videos
+            document.querySelectorAll('#video-grid .video-container').forEach(container => {
+                const vidId = container.id.replace('video-container-', '');
+                if (vidId !== 'local' && vidId !== adminPeerId) {
+                    addAdminControlsToContainer(container, vidId);
+                }
+            });
+        } else if (data.type === 'request-record-toggle') {
+            if (isAdmin && !isCoHost) toggleRecording();
+        } else if (data.type === 'recording-state') {
+            if (data.state) {
+                recordingIndicator.classList.remove('hidden');
+                if (isCoHost) btnRecord.classList.replace('text-gray-300', 'text-red-500');
+            } else {
+                recordingIndicator.classList.add('hidden');
+                if (isCoHost) btnRecord.classList.replace('text-red-500', 'text-gray-300');
+            }
         }
     });
 
@@ -480,7 +507,7 @@ window.rejectUser = function(peerId) {
 };
 
 window.kickUser = function(peerId) {
-    if (!isAdmin) return;
+    if (!isAdmin && !isCoHost) return;
     const pData = peersData.get(peerId);
     if (pData && pData.connection) {
         pData.connection.send({ type: 'kick' });
@@ -577,39 +604,63 @@ function addVideoStream(id, stream, name) {
     label.className = 'name-label';
     label.innerText = name;
 
-    if (isAdmin && id !== adminPeerId) {
-        const controls = document.createElement('div');
-        controls.className = 'absolute top-2 right-2 flex gap-2 z-20 opacity-0 transition-opacity duration-300 group-hover:opacity-100';
-        
-        const muteBtn = document.createElement('button');
-        muteBtn.className = 'bg-gray-700 hover:bg-gray-600 w-8 h-8 rounded-full text-white shadow focus:outline-none';
-        muteBtn.innerHTML = '<i class="fa-solid fa-microphone-slash"></i>';
-        muteBtn.title = 'Toggle Mute';
-        muteBtn.onclick = () => {
-            const pData = peersData.get(id);
-            if(pData && pData.connection) {
-                pData.connection.send({ type: 'force-toggle-mute' });
-                muteBtn.classList.replace('bg-gray-700', 'bg-red-500');
-                setTimeout(() => muteBtn.classList.replace('bg-red-500', 'bg-gray-700'), 300);
-            }
-        };
-        
-        const kickBtn = document.createElement('button');
-        kickBtn.className = 'bg-red-600 hover:bg-red-700 w-8 h-8 rounded-full text-white shadow focus:outline-none';
-        kickBtn.innerHTML = '<i class="fa-solid fa-right-from-bracket"></i>';
-        kickBtn.title = 'Kick User';
-        kickBtn.onclick = () => window.kickUser(id);
-        
-        controls.appendChild(muteBtn);
-        controls.appendChild(kickBtn);
-        container.appendChild(controls);
-        container.classList.add('group'); // Enable group-hover
+    if ((isAdmin || isCoHost) && id !== adminPeerId) {
+        addAdminControlsToContainer(container, id);
     }
 
     container.appendChild(video);
     container.appendChild(label);
     videoAreaGrid.appendChild(container);
     updateActiveCount();
+}
+
+function addAdminControlsToContainer(container, id) {
+    if (container.querySelector('.admin-controls-overlay')) return;
+
+    const controls = document.createElement('div');
+    controls.className = 'admin-controls-overlay absolute top-2 right-2 flex gap-2 z-20 opacity-0 transition-opacity duration-300 group-hover:opacity-100';
+    
+    const muteBtn = document.createElement('button');
+    muteBtn.className = 'bg-gray-700 hover:bg-gray-600 w-8 h-8 rounded-full text-white shadow focus:outline-none';
+    muteBtn.innerHTML = '<i class="fa-solid fa-microphone-slash"></i>';
+    muteBtn.title = 'Toggle Mute';
+    muteBtn.onclick = () => {
+        const pData = peersData.get(id);
+        if(pData && pData.connection) {
+            pData.connection.send({ type: 'force-toggle-mute' });
+            muteBtn.classList.replace('bg-gray-700', 'bg-red-500');
+            setTimeout(() => muteBtn.classList.replace('bg-red-500', 'bg-gray-700'), 300);
+        }
+    };
+    
+    const kickBtn = document.createElement('button');
+    kickBtn.className = 'bg-red-600 hover:bg-red-700 w-8 h-8 rounded-full text-white shadow focus:outline-none';
+    kickBtn.innerHTML = '<i class="fa-solid fa-right-from-bracket"></i>';
+    kickBtn.title = 'Kick User';
+    kickBtn.onclick = () => window.kickUser(id);
+    
+    controls.appendChild(muteBtn);
+    controls.appendChild(kickBtn);
+
+    // Only Main Admin can assign Co-Hosts
+    if (isAdmin && !isCoHost) {
+        const hostBtn = document.createElement('button');
+        hostBtn.className = 'bg-blue-600 hover:bg-blue-700 w-8 h-8 rounded-full text-white shadow focus:outline-none';
+        hostBtn.innerHTML = '<i class="fa-solid fa-star"></i>';
+        hostBtn.title = 'Make Co-Host';
+        hostBtn.onclick = () => {
+            const pData = peersData.get(id);
+            if(pData && pData.connection) {
+                pData.connection.send({ type: 'make-cohost' });
+                alert(pData.name + " is now a Co-Host!");
+                hostBtn.remove();
+            }
+        };
+        controls.appendChild(hostBtn);
+    }
+    
+    container.appendChild(controls);
+    container.classList.add('group'); // Enable group-hover
 }
 
 function removeUser(id) {
@@ -670,6 +721,40 @@ function toggleVideo() {
             btnPreviewVideo.classList.replace('bg-red-600', 'bg-gray-700');
             previewVideo.style.opacity = '1';
         }
+    }
+}
+
+function toggleRaiseHand() {
+    isHandRaised = !isHandRaised;
+    if (isHandRaised) {
+        btnRaiseHand.classList.replace('bg-gray-700', 'bg-yellow-500');
+        btnRaiseHand.classList.replace('text-gray-300', 'text-white');
+    } else {
+        btnRaiseHand.classList.replace('bg-yellow-500', 'bg-gray-700');
+        btnRaiseHand.classList.replace('text-white', 'text-gray-300');
+    }
+    
+    toggleHandIcon('local', isHandRaised);
+    
+    peersData.forEach(p => {
+        if (p.connection) p.connection.send({ type: 'hand-toggle', isRaised: isHandRaised });
+    });
+}
+
+function toggleHandIcon(peerId, isRaised) {
+    const container = document.getElementById(`video-container-${peerId}`);
+    if (!container) return;
+    
+    let handIcon = container.querySelector('.hand-icon');
+    if (isRaised) {
+        if (!handIcon) {
+            handIcon = document.createElement('div');
+            handIcon.className = 'hand-icon absolute top-2 left-2 bg-yellow-500 text-white w-8 h-8 flex items-center justify-center rounded-full shadow-lg z-20 animate-bounce';
+            handIcon.innerHTML = '<i class="fa-solid fa-hand"></i>';
+            container.appendChild(handIcon);
+        }
+    } else {
+        if (handIcon) handIcon.remove();
     }
 }
 
@@ -785,6 +870,17 @@ function leaveMeeting() {
 
 // === Recording Functionality (With Audio Mixing) ===
 async function toggleRecording() {
+    if (isCoHost) {
+        // Co-Host requests Main Host to record, to ensure the file saves on Main Host's device
+        const pData = peersData.get(adminPeerId);
+        if (pData && pData.connection) {
+            pData.connection.send({ type: 'request-record-toggle' });
+            btnRecord.classList.add('text-blue-500');
+            setTimeout(() => btnRecord.classList.remove('text-blue-500'), 500);
+        }
+        return;
+    }
+
     if (!isAdmin) return;
 
     if (isRecording) {
@@ -871,12 +967,18 @@ async function startRecording() {
                 audioContext.close();
                 audioContext = null;
             }
+            
+            // Broadcast recording stopped
+            peersData.forEach(p => { if(p.connection) p.connection.send({type: 'recording-state', state: false}); });
         };
         
         mediaRecorder.start();
         isRecording = true;
         btnRecord.classList.replace('text-gray-300', 'text-red-500');
         recordingIndicator.classList.remove('hidden');
+        
+        // Broadcast recording started
+        peersData.forEach(p => { if(p.connection) p.connection.send({type: 'recording-state', state: true}); });
         
         if (!reusedScreenShare) {
             recordingVideoStream.getVideoTracks()[0].onended = () => {
