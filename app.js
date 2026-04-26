@@ -218,7 +218,7 @@ async function handleAdminLogin() {
         if (btnToggleSidebar) btnToggleSidebar.classList.remove('hidden', 'md:hidden');
         btnRecord.classList.remove('hidden');
 
-        initializePeer();
+        await initializePeer();
     } else {
         loginError.classList.remove('hidden');
     }
@@ -237,24 +237,41 @@ async function handleUserJoinRequest() {
     if(!mediaSuccess) return;
 
     showScreen('waiting');
-    initializePeer();
+    await initializePeer();
 }
 
 // === Peer Initialization (Mesh) ===
-const peerConfig = {
-    config: {
-        'iceServers': [
-            { urls: 'stun:stun.l.google.com:19302' },
-            { urls: 'stun:stun1.l.google.com:19302' },
-            { urls: 'stun:stun2.l.google.com:19302' },
-            { urls: 'stun:stun3.l.google.com:19302' },
-            { urls: 'stun:stun4.l.google.com:19302' },
-            { urls: 'stun:global.stun.twilio.com:3478' }
-        ]
-    }
-};
+const twilioAccountSid = 'AC09ee27b48b02b73be35c8f97bb92af04';
+const twilioAuthToken = 'e521bb75c3c60565048b47b96fe884fb';
 
-function initializePeer() {
+async function getTwilioIceServers() {
+    try {
+        const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${twilioAccountSid}/Tokens.json`, {
+            method: 'POST',
+            headers: {
+                'Authorization': 'Basic ' + btoa(twilioAccountSid + ':' + twilioAuthToken)
+            }
+        });
+        const data = await response.json();
+        return data.ice_servers;
+    } catch (err) {
+        console.error("Twilio error:", err);
+        return [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:global.stun.twilio.com:3478' }
+        ];
+    }
+}
+
+async function initializePeer() {
+    const iceServers = await getTwilioIceServers();
+    
+    const peerConfig = {
+        config: {
+            'iceServers': iceServers
+        }
+    };
+
     const peerId = isAdmin ? ('meet-' + Math.random().toString(36).substr(2, 9)) : undefined;
     peer = new Peer(peerId, peerConfig);
 
