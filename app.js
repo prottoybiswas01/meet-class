@@ -109,8 +109,8 @@ async function startLocalVideo() {
         // Optimize for global/weak networks: Limit resolution to 480p and enable audio optimizations
         const constraints = {
             video: {
-                width: { ideal: 640, max: 1280 },
-                height: { ideal: 480, max: 720 },
+                width: { ideal: 1280, max: 1920 },
+                height: { ideal: 720, max: 1080 },
                 frameRate: { ideal: 24, max: 30 }
             },
             audio: true // Simplified to avoid device-specific audio constraint failures
@@ -764,10 +764,12 @@ async function toggleScreenShare() {
         stopScreenShare();
     } else {
         try {
-            // Optimize screen share bandwidth by capping framerate
+            // Request high-quality full screen video for screen sharing
             const displayConstraints = {
                 video: {
-                    frameRate: { ideal: 15, max: 30 }
+                    width: { ideal: 1920, max: 1920 },
+                    height: { ideal: 1080, max: 1080 },
+                    frameRate: { ideal: 30, max: 30 }
                 },
                 audio: false
             };
@@ -791,12 +793,11 @@ async function toggleScreenShare() {
                 if (p.connection) p.connection.send({type: 'screen-share-start'});
             });
 
-            // Local layout update
+            // Local layout update (Hide all other videos)
             focusVideo.srcObject = screenStream;
             focusName.innerText = "You (Screen)";
             focusContainer.classList.remove('hidden');
-            videoAreaGrid.classList.remove('video-grid', 'overflow-y-auto');
-            videoAreaGrid.classList.add('grid-focus-sidebar');
+            videoAreaGrid.classList.add('hidden');
 
             screenTrack.onended = () => { if (isScreenSharing) stopScreenShare(); };
         } catch (err) {
@@ -830,11 +831,10 @@ function stopScreenShare() {
         if (p.connection) p.connection.send({type: 'screen-share-stop'});
     });
 
-    // Local layout update
+    // Local layout update (Restore all other videos)
     focusContainer.classList.add('hidden');
     focusVideo.srcObject = null;
-    videoAreaGrid.classList.remove('grid-focus-sidebar');
-    videoAreaGrid.classList.add('video-grid', 'overflow-y-auto');
+    videoAreaGrid.classList.remove('hidden');
 }
 
 function handleScreenShareStart(peerId) {
@@ -846,8 +846,7 @@ function handleScreenShareStart(peerId) {
     focusName.innerText = peerData.name + " (Screen)";
     
     focusContainer.classList.remove('hidden');
-    videoAreaGrid.classList.remove('video-grid', 'overflow-y-auto');
-    videoAreaGrid.classList.add('grid-focus-sidebar');
+    videoAreaGrid.classList.add('hidden');
 }
 
 function handleScreenShareStop(peerId) {
@@ -858,8 +857,7 @@ function handleScreenShareStop(peerId) {
     focusContainer.classList.add('hidden');
     focusVideo.srcObject = null;
     
-    videoAreaGrid.classList.remove('grid-focus-sidebar');
-    videoAreaGrid.classList.add('video-grid', 'overflow-y-auto');
+    videoAreaGrid.classList.remove('hidden');
 }
 
 function leaveMeeting() {
@@ -900,10 +898,15 @@ async function startRecording() {
             recordingVideoStream = screenStream;
             reusedScreenShare = true;
         } else {
-            // Request the user to select the screen to share
+            // Request the user to select the screen to share (High Quality)
             recordingVideoStream = await navigator.mediaDevices.getDisplayMedia({ 
-                video: { cursor: "always" }, 
-                audio: true // Attempt to get system audio if possible
+                video: { 
+                    cursor: "always",
+                    width: { ideal: 1920, max: 1920 },
+                    height: { ideal: 1080, max: 1080 },
+                    frameRate: { ideal: 30 }
+                }, 
+                audio: true 
             });
             reusedScreenShare = false;
         }
@@ -938,7 +941,10 @@ async function startRecording() {
             audioDestination.stream.getAudioTracks()[0]
         ]);
         
-        mediaRecorder = new MediaRecorder(combinedStream, { mimeType: 'video/webm' });
+        mediaRecorder = new MediaRecorder(combinedStream, { 
+            mimeType: 'video/webm;codecs=vp8,opus',
+            videoBitsPerSecond: 3000000 // 3 Mbps for high quality video recording
+        });
         
         mediaRecorder.ondataavailable = function(e) {
             if (e.data && e.data.size > 0) recordedChunks.push(e.data);
