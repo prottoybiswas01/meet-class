@@ -893,9 +893,14 @@ let recordingVideoStream = null;
 
 async function startRecording() {
     try {
-        if (isScreenSharing && screenStream) {
-            // Reuse the existing screen share stream to prevent freezing (browser bug with multiple captures)
+        if (currentSharer === 'local' && screenStream) {
+            // We are sharing our own screen, reuse it
             recordingVideoStream = screenStream;
+            reusedScreenShare = true;
+        } else if (currentSharer && peersData.has(currentSharer)) {
+            // A remote user (like Co-Host) is sharing their screen! Record their stream directly!
+            // No need to ask the Main Host for getDisplayMedia.
+            recordingVideoStream = peersData.get(currentSharer).stream;
             reusedScreenShare = true;
         } else {
             // Request the user to select the screen to share (High Quality)
