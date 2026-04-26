@@ -110,11 +110,7 @@ async function startLocalVideo() {
                 height: { ideal: 480, max: 720 },
                 frameRate: { ideal: 24, max: 30 }
             },
-            audio: {
-                echoCancellation: true,
-                noiseSuppression: true,
-                autoGainControl: true
-            }
+            audio: true // Simplified to avoid device-specific audio constraint failures
         };
         localStream = await navigator.mediaDevices.getUserMedia(constraints);
         localVideo.srcObject = localStream;
@@ -376,9 +372,8 @@ function setupCallListeners(call, name) {
     pData.call = call;
 
     call.on('stream', stream => {
-        // Check if stream is already handled
-        if (pData.stream && pData.stream.id === stream.id) return;
-        
+        // Removed stream.id check: PeerJS sometimes fires stream event multiple times (e.g. video then audio).
+        // By passing it to addVideoStream, we ensure the latest stream with all tracks is attached.
         pData.stream = stream;
         addVideoStream(call.peer, stream, name);
         
@@ -508,9 +503,12 @@ function addVideoStream(id, stream, name) {
     let container = document.getElementById(`video-container-${id}`);
     
     if (container) {
-        // If container exists but stream changed (e.g. they reconnected quickly)
+        // If container exists but stream changed (e.g. they reconnected quickly or audio track was added)
         const video = container.querySelector('video');
-        if (video.srcObject !== stream) video.srcObject = stream;
+        if (video.srcObject !== stream) {
+            video.srcObject = stream;
+            video.play().catch(e => console.error("Play failed after updating stream:", e));
+        }
         return;
     }
 
@@ -522,10 +520,22 @@ function addVideoStream(id, stream, name) {
     video.srcObject = stream;
     video.autoplay = true;
     video.playsInline = true;
+    video.muted = false; // Explicitly ensure remote video is not muted
     
-    // Explicitly play video to prevent mobile browsers from freezing the first frame
+    // Explicitly play video to prevent mobile browsers from freezing the first frame or blocking audio
     video.onloadedmetadata = () => {
-        video.play().catch(e => console.error("Auto-play prevented by browser:", e));
+        video.play().catch(e => {
+            console.error("Auto-play prevented by browser:", e);
+            // Autoplay policy blocked the video/audio. Show a button to let the user manually play it.
+            const playBtn = document.createElement('button');
+            playBtn.innerHTML = '<i class="fa-solid fa-volume-high"></i> Tap to Hear';
+            playBtn.className = "absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-brand-600 hover:bg-brand-500 text-white px-4 py-2 rounded-full shadow-lg z-50 text-sm font-bold flex items-center gap-2";
+            playBtn.onclick = () => {
+                video.play();
+                playBtn.remove();
+            };
+            container.appendChild(playBtn);
+        });
     };
 
     const label = document.createElement('div');
