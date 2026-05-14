@@ -48,11 +48,19 @@ const videoAreaGrid = document.getElementById('video-grid');
 const focusContainer = document.getElementById('focus-container');
 const focusVideo = document.getElementById('focus-video');
 const focusName = document.getElementById('focus-name');
+const focusPlaceholder = document.getElementById('focus-placeholder');
 const localVideo = document.getElementById('local-video');
 const btnToggleAudio = document.getElementById('btn-toggle-audio');
 const btnToggleVideo = document.getElementById('btn-toggle-video');
 const btnRaiseHand = document.getElementById('btn-raise-hand');
 const btnLeave = document.getElementById('btn-leave');
+const meetingRoleBadge = document.getElementById('meeting-role-badge');
+const meetingFlowCopy = document.getElementById('meeting-flow-copy');
+const stageTitle = document.getElementById('stage-title');
+const stageCopy = document.getElementById('stage-copy');
+const presenterChip = document.getElementById('presenter-chip');
+const recordingChip = document.getElementById('recording-chip');
+const gridCopy = document.getElementById('grid-copy');
 
 // === State ===
 let isAdmin = false;
@@ -81,6 +89,11 @@ let audioDestination;
 
 // === Initialization ===
 function init() {
+    setMeetingRoleUI();
+    setPresentationLayout(false);
+    setRecordingUI(false);
+    setScreenShareButtonState(false);
+
     const hash = window.location.hash.substring(1);
     if (hash) {
         adminPeerId = hash;
@@ -100,6 +113,88 @@ function showScreen(screenName) {
     if (screens[screenName]) {
         screens[screenName].classList.remove('hidden-section');
     }
+}
+
+function setMeetingRoleUI() {
+    if (!meetingRoleBadge || !meetingFlowCopy) return;
+
+    if (isAdmin) {
+        meetingRoleBadge.innerHTML = '<i class="fa-solid fa-crown text-brand-400"></i> Host';
+        meetingFlowCopy.textContent = 'This laptop is the host device. Admit users, watch presentations, and save recordings here.';
+        return;
+    }
+
+    if (isCoHost) {
+        meetingRoleBadge.innerHTML = '<i class="fa-solid fa-star text-brand-400"></i> Co-host';
+        meetingFlowCopy.textContent = 'You can help manage the room. Recording still saves on the main host laptop.';
+        return;
+    }
+
+    meetingRoleBadge.innerHTML = '<i class="fa-solid fa-user-group text-brand-400"></i> Participant';
+    meetingFlowCopy.textContent = 'Presenters share from their own device. Host recording stays on the host laptop.';
+}
+
+function setRecordButtonState(active) {
+    if (!btnRecord) return;
+
+    btnRecord.classList.remove('bg-slate-800', 'bg-red-600', 'text-slate-300', 'text-white');
+    if (active) {
+        btnRecord.classList.add('bg-red-600', 'text-white');
+    } else {
+        btnRecord.classList.add('bg-slate-800', 'text-slate-300');
+    }
+}
+
+function setScreenShareButtonState(active) {
+    if (!btnScreenShare) return;
+
+    btnScreenShare.classList.remove('bg-slate-800', 'bg-brand-600', 'text-slate-300', 'text-white');
+    if (active) {
+        btnScreenShare.classList.add('bg-brand-600', 'text-white');
+    } else {
+        btnScreenShare.classList.add('bg-slate-800', 'text-slate-300');
+    }
+}
+
+function setRecordingUI(active) {
+    if (recordingIndicator) {
+        recordingIndicator.classList.toggle('hidden', !active);
+    }
+
+    if (recordingChip) {
+        recordingChip.innerHTML = active
+            ? '<i class="fa-solid fa-circle-dot text-red-400"></i> Recording on host laptop'
+            : '<i class="fa-solid fa-circle-dot text-amber-400"></i> Recording idle';
+    }
+
+    setRecordButtonState(active);
+}
+
+function setPresentationLayout(active, sharerName = '', isLocalSharer = false) {
+    if (focusPlaceholder) {
+        focusPlaceholder.classList.toggle('hidden', active);
+    }
+
+    focusContainer.classList.toggle('hidden', !active);
+    videoAreaGrid.classList.toggle('share-mode', active);
+
+    if (active) {
+        const stageLabel = isLocalSharer ? 'You are presenting' : `${sharerName} is presenting`;
+        stageTitle.textContent = stageLabel;
+        stageCopy.textContent = isLocalSharer
+            ? 'The screen-share approval came from this device. Other users should only receive your presentation feed.'
+            : `${sharerName}'s device granted the screen-share permission. Viewers should see the stage without receiving a local share prompt.`;
+        presenterChip.innerHTML = `<i class="fa-solid fa-display text-brand-400"></i> ${stageLabel}`;
+        gridCopy.textContent = 'Filmstrip mode is active while the presentation stays on stage.';
+        return;
+    }
+
+    focusVideo.srcObject = null;
+    focusName.innerText = 'Presentation Stage';
+    stageTitle.textContent = 'Ready for the room';
+    stageCopy.textContent = 'When someone clicks present, that person\'s browser should ask for screen-share approval. Everyone else should only receive the shared view.';
+    presenterChip.innerHTML = '<i class="fa-solid fa-display text-brand-400"></i> No one is presenting';
+    gridCopy.textContent = 'Grid view in normal mode. Filmstrip view while someone presents.';
 }
 
 async function startLocalVideo() {
@@ -168,8 +263,10 @@ function setupEventListeners() {
     btnCopyLink.addEventListener('click', () => {
         inputInviteLink.select();
         document.execCommand('copy');
-        btnCopyLink.innerHTML = '<i class="fa-solid fa-check text-green-500"></i>';
-        setTimeout(() => btnCopyLink.innerHTML = '<i class="fa-regular fa-copy"></i>', 2000);
+        btnCopyLink.innerHTML = '<i class="fa-solid fa-check text-emerald-400"></i><span class="hidden lg:inline">Copied</span>';
+        setTimeout(() => {
+            btnCopyLink.innerHTML = '<i class="fa-regular fa-copy"></i><span class="hidden lg:inline">Copy</span>';
+        }, 2000);
     });
 
     btnRecord.addEventListener('click', toggleRecording);
@@ -211,6 +308,7 @@ async function handleAdminLogin() {
     if (id === 'admin' && pass === '123456') {
         isAdmin = true;
         myName = "Host";
+        setMeetingRoleUI();
         screens.adminLogin.classList.add('hidden-section');
         
         const mediaSuccess = await startLocalVideo();
@@ -219,8 +317,9 @@ async function handleAdminLogin() {
         showScreen('meeting');
         adminControlsHeader.classList.remove('hidden');
         adminSidebar.classList.remove('hidden');
-        if (btnToggleSidebar) btnToggleSidebar.classList.remove('hidden', 'md:hidden');
+        if (btnToggleSidebar) btnToggleSidebar.classList.remove('hidden');
         btnRecord.classList.remove('hidden');
+        setRecordButtonState(false);
 
         await initializePeer();
     } else {
@@ -378,6 +477,8 @@ function setupConnectionListeners(conn) {
             isCoHost = true;
             alert("You are now a Co-Host!");
             btnRecord.classList.remove('hidden'); // Co-Hosts can also record (via main host)
+            setMeetingRoleUI();
+            setRecordButtonState(isRecording);
             // Re-render admin controls for existing videos
             document.querySelectorAll('#video-grid .video-container').forEach(container => {
                 const vidId = container.id.replace('video-container-', '');
@@ -388,13 +489,7 @@ function setupConnectionListeners(conn) {
         } else if (data.type === 'request-record-toggle') {
             if (isAdmin && !isCoHost) toggleRecording();
         } else if (data.type === 'recording-state') {
-            if (data.state) {
-                recordingIndicator.classList.remove('hidden');
-                if (isCoHost) btnRecord.classList.replace('text-gray-300', 'text-red-500');
-            } else {
-                recordingIndicator.classList.add('hidden');
-                if (isCoHost) btnRecord.classList.replace('text-red-500', 'text-gray-300');
-            }
+            setRecordingUI(data.state);
         }
     });
 
@@ -444,12 +539,15 @@ function updateRequestsUI() {
 
     pendingRequests.forEach((req, peerId) => {
         const div = document.createElement('div');
-        div.className = 'bg-gray-700 p-3 rounded-lg flex items-center justify-between';
+        div.className = 'rounded-3xl border border-slate-800 bg-slate-900/70 p-4 flex items-center justify-between gap-3';
         div.innerHTML = `
-            <span class="font-medium text-sm truncate w-24" title="${req.name}">${req.name}</span>
-            <div class="flex gap-2">
-                <button class="bg-red-500 hover:bg-red-600 w-8 h-8 rounded text-white flex items-center justify-center" onclick="rejectUser('${peerId}')"><i class="fa-solid fa-xmark"></i></button>
-                <button class="bg-green-500 hover:bg-green-600 w-8 h-8 rounded text-white flex items-center justify-center" onclick="approveUser('${peerId}')"><i class="fa-solid fa-check"></i></button>
+            <div class="min-w-0">
+                <p class="truncate text-sm font-semibold text-white" title="${req.name}">${req.name}</p>
+                <p class="text-xs text-slate-500">Waiting for host approval</p>
+            </div>
+            <div class="flex shrink-0 gap-2">
+                <button class="flex h-10 w-10 items-center justify-center rounded-full bg-red-500 text-white transition hover:bg-red-600" onclick="rejectUser('${peerId}')"><i class="fa-solid fa-xmark"></i></button>
+                <button class="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-500 text-white transition hover:bg-emerald-600" onclick="approveUser('${peerId}')"><i class="fa-solid fa-check"></i></button>
             </div>
         `;
         requestsList.appendChild(div);
@@ -538,6 +636,8 @@ function handleApproved(roomPeers) {
     isApproved = true;
     
     showScreen('meeting');
+    setMeetingRoleUI();
+    setPresentationLayout(false);
     
     // Admin will call us, so we just wait for Admin's call.
     // However, we need to call other existing peers in the room.
@@ -570,6 +670,9 @@ function addVideoStream(id, stream, name) {
         if (video.srcObject !== stream) {
             video.srcObject = stream;
             video.play().catch(e => console.error("Play failed after updating stream:", e));
+        }
+        if (currentSharer === id && focusVideo.srcObject !== stream) {
+            focusVideo.srcObject = stream;
         }
         return;
     }
@@ -664,6 +767,11 @@ function addAdminControlsToContainer(container, id) {
 }
 
 function removeUser(id) {
+    if (currentSharer === id) {
+        currentSharer = null;
+        setPresentationLayout(false);
+    }
+
     const el = document.getElementById(`video-container-${id}`);
     if (el) el.remove();
     peersData.delete(id);
@@ -682,18 +790,22 @@ function toggleAudio() {
     if (audioTrack.enabled) {
         audioTrack.enabled = false;
         btnToggleAudio.innerHTML = '<i class="fa-solid fa-microphone-slash"></i>';
-        btnToggleAudio.classList.replace('bg-gray-700', 'bg-red-600');
+        btnToggleAudio.classList.remove('bg-slate-800');
+        btnToggleAudio.classList.add('bg-red-600');
         if (btnPreviewAudio) {
             btnPreviewAudio.innerHTML = '<i class="fa-solid fa-microphone-slash"></i>';
-            btnPreviewAudio.classList.replace('bg-gray-700', 'bg-red-600');
+            btnPreviewAudio.classList.remove('bg-slate-800');
+            btnPreviewAudio.classList.add('bg-red-600');
         }
     } else {
         audioTrack.enabled = true;
         btnToggleAudio.innerHTML = '<i class="fa-solid fa-microphone"></i>';
-        btnToggleAudio.classList.replace('bg-red-600', 'bg-gray-700');
+        btnToggleAudio.classList.remove('bg-red-600');
+        btnToggleAudio.classList.add('bg-slate-800');
         if (btnPreviewAudio) {
             btnPreviewAudio.innerHTML = '<i class="fa-solid fa-microphone"></i>';
-            btnPreviewAudio.classList.replace('bg-red-600', 'bg-gray-700');
+            btnPreviewAudio.classList.remove('bg-red-600');
+            btnPreviewAudio.classList.add('bg-slate-800');
         }
     }
 }
@@ -704,21 +816,25 @@ function toggleVideo() {
     if (videoTrack.enabled) {
         videoTrack.enabled = false;
         btnToggleVideo.innerHTML = '<i class="fa-solid fa-video-slash"></i>';
-        btnToggleVideo.classList.replace('bg-gray-700', 'bg-red-600');
+        btnToggleVideo.classList.remove('bg-slate-800');
+        btnToggleVideo.classList.add('bg-red-600');
         localVideo.style.opacity = '0.3';
         if (btnPreviewVideo) {
             btnPreviewVideo.innerHTML = '<i class="fa-solid fa-video-slash"></i>';
-            btnPreviewVideo.classList.replace('bg-gray-700', 'bg-red-600');
+            btnPreviewVideo.classList.remove('bg-slate-800');
+            btnPreviewVideo.classList.add('bg-red-600');
             previewVideo.style.opacity = '0.3';
         }
     } else {
         videoTrack.enabled = true;
         btnToggleVideo.innerHTML = '<i class="fa-solid fa-video"></i>';
-        btnToggleVideo.classList.replace('bg-red-600', 'bg-gray-700');
+        btnToggleVideo.classList.remove('bg-red-600');
+        btnToggleVideo.classList.add('bg-slate-800');
         localVideo.style.opacity = '1';
         if (btnPreviewVideo) {
             btnPreviewVideo.innerHTML = '<i class="fa-solid fa-video"></i>';
-            btnPreviewVideo.classList.replace('bg-red-600', 'bg-gray-700');
+            btnPreviewVideo.classList.remove('bg-red-600');
+            btnPreviewVideo.classList.add('bg-slate-800');
             previewVideo.style.opacity = '1';
         }
     }
@@ -727,11 +843,11 @@ function toggleVideo() {
 function toggleRaiseHand() {
     isHandRaised = !isHandRaised;
     if (isHandRaised) {
-        btnRaiseHand.classList.replace('bg-gray-700', 'bg-yellow-500');
-        btnRaiseHand.classList.replace('text-gray-300', 'text-white');
+        btnRaiseHand.classList.remove('bg-slate-800', 'text-slate-300');
+        btnRaiseHand.classList.add('bg-amber-500', 'text-white');
     } else {
-        btnRaiseHand.classList.replace('bg-yellow-500', 'bg-gray-700');
-        btnRaiseHand.classList.replace('text-white', 'text-gray-300');
+        btnRaiseHand.classList.remove('bg-amber-500', 'text-white');
+        btnRaiseHand.classList.add('bg-slate-800', 'text-slate-300');
     }
     
     toggleHandIcon('local', isHandRaised);
@@ -786,18 +902,17 @@ async function toggleScreenShare() {
 
             isScreenSharing = true;
             currentSharer = 'local';
-            btnScreenShare.classList.replace('text-gray-300', 'text-blue-500');
+            setScreenShareButtonState(true);
 
             // Broadcast
             peersData.forEach(p => {
                 if (p.connection) p.connection.send({type: 'screen-share-start'});
             });
 
-            // Local layout update (Hide all other videos)
+            // Local layout update
             focusVideo.srcObject = screenStream;
             focusName.innerText = "You (Screen)";
-            focusContainer.classList.remove('hidden');
-            videoAreaGrid.classList.add('hidden');
+            setPresentationLayout(true, myName || 'You', true);
 
             screenTrack.onended = () => { if (isScreenSharing) stopScreenShare(); };
         } catch (err) {
@@ -819,7 +934,7 @@ function stopScreenShare() {
     screenStream = null;
     isScreenSharing = false;
     if (currentSharer === 'local') currentSharer = null;
-    btnScreenShare.classList.replace('text-blue-500', 'text-gray-300');
+    setScreenShareButtonState(false);
 
     // Revert track for all calls
     const cameraTrack = localStream.getVideoTracks()[0];
@@ -831,10 +946,7 @@ function stopScreenShare() {
         if (p.connection) p.connection.send({type: 'screen-share-stop'});
     });
 
-    // Local layout update (Restore all other videos)
-    focusContainer.classList.add('hidden');
-    focusVideo.srcObject = null;
-    videoAreaGrid.classList.remove('hidden');
+    setPresentationLayout(false);
 }
 
 function handleScreenShareStart(peerId) {
@@ -844,9 +956,7 @@ function handleScreenShareStart(peerId) {
     currentSharer = peerId;
     focusVideo.srcObject = peerData.stream;
     focusName.innerText = peerData.name + " (Screen)";
-    
-    focusContainer.classList.remove('hidden');
-    videoAreaGrid.classList.add('hidden');
+    setPresentationLayout(true, peerData.name, false);
 }
 
 function handleScreenShareStop(peerId) {
@@ -854,10 +964,7 @@ function handleScreenShareStop(peerId) {
     if (currentSharer !== peerId) return;
     
     currentSharer = null;
-    focusContainer.classList.add('hidden');
-    focusVideo.srcObject = null;
-    
-    videoAreaGrid.classList.remove('hidden');
+    setPresentationLayout(false);
 }
 
 function leaveMeeting() {
@@ -873,8 +980,8 @@ async function toggleRecording() {
         const pData = peersData.get(adminPeerId);
         if (pData && pData.connection) {
             pData.connection.send({ type: 'request-record-toggle' });
-            btnRecord.classList.add('text-blue-500');
-            setTimeout(() => btnRecord.classList.remove('text-blue-500'), 500);
+            btnRecord.classList.add('ring-2', 'ring-brand-400');
+            setTimeout(() => btnRecord.classList.remove('ring-2', 'ring-brand-400'), 500);
         }
         return;
     }
@@ -971,8 +1078,7 @@ async function startRecording() {
             }, 100);
             
             isRecording = false;
-            btnRecord.classList.replace('text-red-500', 'text-gray-300');
-            recordingIndicator.classList.add('hidden');
+            setRecordingUI(false);
             
             if (audioContext) {
                 audioContext.close();
@@ -985,8 +1091,7 @@ async function startRecording() {
         
         mediaRecorder.start();
         isRecording = true;
-        btnRecord.classList.replace('text-gray-300', 'text-red-500');
-        recordingIndicator.classList.remove('hidden');
+        setRecordingUI(true);
         
         // Broadcast recording started
         peersData.forEach(p => { if(p.connection) p.connection.send({type: 'recording-state', state: true}); });
