@@ -50,12 +50,15 @@ const focusContainer = document.getElementById('focus-container');
 const focusVideo = document.getElementById('focus-video');
 const focusName = document.getElementById('focus-name');
 const focusPlaceholder = document.getElementById('focus-placeholder');
+const btnStageFullscreenEnter = document.getElementById('btn-stage-fullscreen-enter');
+const btnStageFullscreenExit = document.getElementById('btn-stage-fullscreen-exit');
 const participantsPanel = document.getElementById('participants-panel');
 const localVideo = document.getElementById('local-video');
 const btnToggleAudio = document.getElementById('btn-toggle-audio');
 const btnToggleVideo = document.getElementById('btn-toggle-video');
 const btnRaiseHand = document.getElementById('btn-raise-hand');
 const btnLeave = document.getElementById('btn-leave');
+const meetingFooter = document.getElementById('meeting-footer');
 const meetingRoleBadge = document.getElementById('meeting-role-badge');
 const meetingFlowCopy = document.getElementById('meeting-flow-copy');
 const stageTitle = document.getElementById('stage-title');
@@ -98,6 +101,8 @@ let audioContext;
 let audioDestination;
 let reconnectTimer = null;
 let orientationLockRequested = false;
+let isManualStageFullscreen = false;
+let stageControlsHideTimer = null;
 
 // === Initialization ===
 function init() {
@@ -219,12 +224,94 @@ function syncPresentationViewportMode(active = Boolean(currentSharer), sharerRol
     const shouldPrioritizeStage = active && !isDesktopViewport();
     document.body.classList.toggle('mobile-stage-priority', shouldPrioritizeStage);
 
-    if (shouldPrioritizeStage) {
-        tryLockLandscapePresentation();
-        return;
+    if (!shouldPrioritizeStage && !isManualStageFullscreen) {
+        releaseLandscapePresentationLock();
+    }
+    syncStageFullscreenButtons(active);
+}
+
+function clearStageControlsHideTimer() {
+    if (stageControlsHideTimer) {
+        clearTimeout(stageControlsHideTimer);
+        stageControlsHideTimer = null;
+    }
+}
+
+function getActiveFullscreenElement() {
+    return document.fullscreenElement || document.webkitFullscreenElement || null;
+}
+
+function syncStageFullscreenButtons(isPresenting = Boolean(currentSharer)) {
+    if (!btnStageFullscreenEnter || !btnStageFullscreenExit) return;
+
+    btnStageFullscreenEnter.classList.toggle('hidden', !isPresenting || isManualStageFullscreen);
+    btnStageFullscreenExit.classList.toggle('hidden', !isPresenting || !isManualStageFullscreen);
+}
+
+function showStageFullscreenControlsTemporarily(duration = 2600) {
+    if (!isManualStageFullscreen) return;
+
+    document.body.classList.add('manual-stage-controls-visible');
+    clearStageControlsHideTimer();
+    stageControlsHideTimer = setTimeout(() => {
+        document.body.classList.remove('manual-stage-controls-visible');
+        stageControlsHideTimer = null;
+    }, duration);
+}
+
+function applyManualStageFullscreenState(active) {
+    isManualStageFullscreen = active;
+    document.body.classList.toggle('manual-stage-fullscreen', active);
+    document.body.classList.toggle('manual-stage-controls-visible', active);
+
+    if (!active) {
+        clearStageControlsHideTimer();
+        document.body.classList.remove('manual-stage-controls-visible');
+        releaseLandscapePresentationLock();
+    } else {
+        showStageFullscreenControlsTemporarily();
     }
 
-    releaseLandscapePresentationLock();
+    syncStageFullscreenButtons(Boolean(currentSharer));
+}
+
+async function enterManualStageFullscreen() {
+    if (!currentSharer || isManualStageFullscreen) return;
+
+    applyManualStageFullscreenState(true);
+
+    try {
+        const fullscreenTarget = screens.meeting || document.documentElement;
+        const requestFullscreenFn = fullscreenTarget.requestFullscreen || fullscreenTarget.webkitRequestFullscreen;
+        if (!getActiveFullscreenElement() && requestFullscreenFn) {
+            await requestFullscreenFn.call(fullscreenTarget);
+        }
+    } catch (err) {
+        console.debug('Fullscreen request not available:', err);
+    }
+
+    await tryLockLandscapePresentation();
+}
+
+async function exitManualStageFullscreen() {
+    if (!isManualStageFullscreen) return;
+
+    applyManualStageFullscreenState(false);
+
+    try {
+        const exitFullscreenFn = document.exitFullscreen || document.webkitExitFullscreen;
+        if (getActiveFullscreenElement() && exitFullscreenFn) {
+            await exitFullscreenFn.call(document);
+        }
+    } catch (err) {
+        console.debug('Fullscreen exit not available:', err);
+    }
+}
+
+function handleBrowserFullscreenChange() {
+    if (!getActiveFullscreenElement() && isManualStageFullscreen) {
+        applyManualStageFullscreenState(false);
+    }
 }
 
 function updatePeerRole(peerId, role) {
@@ -672,6 +759,10 @@ function setPresentationLayout(active, sharerName = '', isLocalSharer = false, s
         return;
     }
 
+    if (isManualStageFullscreen) {
+        exitManualStageFullscreen();
+    }
+
     currentSharerRole = null;
     syncPresentationViewportMode(false);
 
@@ -790,6 +881,42 @@ function setupEventListeners() {
     if (btnPreviewVideo) btnPreviewVideo.addEventListener('click', toggleVideo);
     document.addEventListener('click', unlockRemoteAudioPlayback, { passive: true, once: true });
     document.addEventListener('touchstart', unlockRemoteAudioPlayback, { passive: true, once: true });
+    document.addEventListener('fullscreenchange', handleBrowserFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleBrowserFullscreenChange);
+
+    if (btnStageFullscreenEnter) {
+        btnStageFullscreenEnter.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            enterManualStageFullscreen();
+        });
+    }
+
+    if (btnStageFullscreenExit) {
+        btnStageFullscreenExit.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            exitManualStageFullscreen();
+        });
+    }
+
+    if (focusContainer) {
+        const revealStageControls = () => {
+            if (isManualStageFullscreen) {
+                showStageFullscreenControlsTemporarily();
+            }
+        };
+        focusContainer.addEventListener('click', revealStageControls);
+        focusContainer.addEventListener('touchstart', revealStageControls, { passive: true });
+    }
+
+    if (meetingFooter) {
+        meetingFooter.addEventListener('click', () => {
+            if (isManualStageFullscreen) {
+                showStageFullscreenControlsTemporarily();
+            }
+        });
+    }
     
     if (btnClosePermission) {
         btnClosePermission.addEventListener('click', () => {
@@ -1611,6 +1738,9 @@ function handleScreenShareStop(peerId) {
 }
 
 function leaveMeeting() {
+    if (isManualStageFullscreen) {
+        applyManualStageFullscreenState(false);
+    }
     syncPresentationViewportMode(false);
     if (localStream) localStream.getTracks().forEach(t => t.stop());
     if (peer) peer.destroy();
