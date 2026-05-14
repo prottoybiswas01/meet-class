@@ -211,7 +211,7 @@ function releaseLandscapePresentationLock() {
 }
 
 function syncPresentationViewportMode(active = Boolean(currentSharer), sharerRole = currentSharerRole) {
-    const shouldPrioritizeStage = active && !isDesktopViewport() && isHostLikeRole(sharerRole);
+    const shouldPrioritizeStage = active && !isDesktopViewport();
     document.body.classList.toggle('mobile-stage-priority', shouldPrioritizeStage);
 
     if (shouldPrioritizeStage) {

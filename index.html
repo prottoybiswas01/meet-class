@@ -400,23 +400,26 @@
 
         body.mobile-stage-priority #video-area {
             gap: 0.8rem;
-            overflow: hidden;
+            overflow-y: auto;
+            align-items: stretch;
         }
 
         body.mobile-stage-priority #focus-panel {
-            flex: 1 1 auto;
-            min-height: 0;
+            flex: 0 0 auto;
+            min-height: auto;
         }
 
         body.mobile-stage-priority #focus-container {
-            min-height: clamp(15rem, 68vw, 25rem);
-            height: 100%;
-            max-height: none;
+            width: 100%;
+            aspect-ratio: 16 / 9;
+            height: auto;
+            min-height: 0;
+            max-height: min(56vw, 18rem);
         }
 
         body.mobile-stage-priority #participants-panel,
         body.mobile-stage-priority #participants-panel.presenting-layout {
-            flex: 0 0 9.5rem;
+            flex: 0 0 auto;
             min-height: 0;
         }
 
@@ -431,10 +434,13 @@
 
         body.mobile-stage-priority #video-grid.share-mode {
             min-height: 0;
+            height: auto;
+            padding-bottom: 0.1rem;
         }
 
         body.mobile-stage-priority #video-grid.share-mode .video-container {
             width: 8.75rem;
+            min-height: auto;
         }
 
         @media (max-width: 768px) {
