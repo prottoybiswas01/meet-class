@@ -88,6 +88,11 @@ let screenStream = null;
 let currentSharer = null;
 let currentSharerRole = null;
 let remoteAudioUnlocked = false;
+let recordingCanvas = null;
+let recordingCanvasContext = null;
+let recordingSourceVideo = null;
+let recordingAnimationFrame = null;
+let recordingCanvasStream = null;
 
 let audioContext;
 let audioDestination;
@@ -462,6 +467,138 @@ function unlockRemoteAudioPlayback() {
             showRemoteAudioButton(video, container);
         });
     });
+}
+
+function getFullscreenRecordingSize(videoWidth, videoHeight) {
+    const safeWidth = Math.max(2, Math.round(videoWidth || 1920));
+    const safeHeight = Math.max(2, Math.round(videoHeight || 1080));
+    const isLandscape = safeWidth >= safeHeight;
+    const targetAspect = isLandscape ? (16 / 9) : (9 / 16);
+    const sourceAspect = safeWidth / safeHeight;
+
+    if (Math.abs(sourceAspect - targetAspect) < 0.015) {
+        return { width: safeWidth, height: safeHeight };
+    }
+
+    if (sourceAspect > targetAspect) {
+        return {
+            width: safeWidth,
+            height: Math.max(2, Math.round(safeWidth / targetAspect))
+        };
+    }
+
+    return {
+        width: Math.max(2, Math.round(safeHeight * targetAspect)),
+        height: safeHeight
+    };
+}
+
+function stopRecordingRenderer() {
+    if (recordingAnimationFrame) {
+        cancelAnimationFrame(recordingAnimationFrame);
+        recordingAnimationFrame = null;
+    }
+
+    if (recordingSourceVideo) {
+        recordingSourceVideo.pause();
+        recordingSourceVideo.srcObject = null;
+        recordingSourceVideo.remove();
+        recordingSourceVideo = null;
+    }
+
+    if (recordingCanvasStream) {
+        recordingCanvasStream.getVideoTracks().forEach(track => track.stop());
+        recordingCanvasStream = null;
+    }
+
+    recordingCanvasContext = null;
+    recordingCanvas = null;
+}
+
+function renderRecordingFrame() {
+    if (!recordingCanvas || !recordingCanvasContext || !recordingSourceVideo) return;
+
+    const sourceWidth = recordingSourceVideo.videoWidth || recordingCanvas.width;
+    const sourceHeight = recordingSourceVideo.videoHeight || recordingCanvas.height;
+    if (!sourceWidth || !sourceHeight) {
+        recordingAnimationFrame = requestAnimationFrame(renderRecordingFrame);
+        return;
+    }
+
+    const canvasWidth = recordingCanvas.width;
+    const canvasHeight = recordingCanvas.height;
+    const scale = Math.max(canvasWidth / sourceWidth, canvasHeight / sourceHeight);
+    const drawWidth = sourceWidth * scale;
+    const drawHeight = sourceHeight * scale;
+    const drawX = (canvasWidth - drawWidth) / 2;
+    const drawY = (canvasHeight - drawHeight) / 2;
+
+    recordingCanvasContext.clearRect(0, 0, canvasWidth, canvasHeight);
+    recordingCanvasContext.drawImage(recordingSourceVideo, drawX, drawY, drawWidth, drawHeight);
+    recordingAnimationFrame = requestAnimationFrame(renderRecordingFrame);
+}
+
+async function createFullscreenRecordingStream(sourceStream, mixedAudioTrack) {
+    const sourceTrack = sourceStream?.getVideoTracks?.()[0];
+    if (!sourceTrack) {
+        throw new Error('No video track available for recording.');
+    }
+
+    stopRecordingRenderer();
+
+    recordingSourceVideo = document.createElement('video');
+    recordingSourceVideo.autoplay = true;
+    recordingSourceVideo.muted = true;
+    recordingSourceVideo.defaultMuted = true;
+    recordingSourceVideo.playsInline = true;
+    recordingSourceVideo.srcObject = sourceStream;
+    recordingSourceVideo.style.position = 'fixed';
+    recordingSourceVideo.style.left = '-99999px';
+    recordingSourceVideo.style.top = '-99999px';
+    recordingSourceVideo.style.opacity = '0';
+    recordingSourceVideo.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(recordingSourceVideo);
+
+    await new Promise((resolve, reject) => {
+        const handleLoaded = () => {
+            cleanup();
+            resolve();
+        };
+        const handleError = () => {
+            cleanup();
+            reject(new Error('Recording preview video could not load.'));
+        };
+        const cleanup = () => {
+            recordingSourceVideo.removeEventListener('loadedmetadata', handleLoaded);
+            recordingSourceVideo.removeEventListener('error', handleError);
+        };
+
+        recordingSourceVideo.addEventListener('loadedmetadata', handleLoaded, { once: true });
+        recordingSourceVideo.addEventListener('error', handleError, { once: true });
+    });
+
+    await recordingSourceVideo.play();
+
+    const targetSize = getFullscreenRecordingSize(
+        recordingSourceVideo.videoWidth || sourceTrack.getSettings?.().width || 1920,
+        recordingSourceVideo.videoHeight || sourceTrack.getSettings?.().height || 1080
+    );
+
+    recordingCanvas = document.createElement('canvas');
+    recordingCanvas.width = targetSize.width;
+    recordingCanvas.height = targetSize.height;
+    recordingCanvasContext = recordingCanvas.getContext('2d', { alpha: false });
+    recordingCanvasContext.imageSmoothingEnabled = true;
+    recordingCanvasContext.imageSmoothingQuality = 'high';
+
+    renderRecordingFrame();
+
+    recordingCanvasStream = recordingCanvas.captureStream(30);
+    if (mixedAudioTrack) {
+        recordingCanvasStream.addTrack(mixedAudioTrack);
+    }
+
+    return recordingCanvasStream;
 }
 
 function sendCurrentMediaState(conn) {
@@ -1554,13 +1691,8 @@ async function startRecording() {
             displaySource.connect(audioDestination);
         }
 
-        // Combine the screen video track with mixed audio when audio exists.
-        const combinedTracks = [recordingVideoStream.getVideoTracks()[0]];
         const mixedAudioTrack = audioDestination.stream.getAudioTracks()[0];
-        if (mixedAudioTrack) {
-            combinedTracks.push(mixedAudioTrack);
-        }
-        const combinedStream = new MediaStream(combinedTracks);
+        const combinedStream = await createFullscreenRecordingStream(recordingVideoStream, mixedAudioTrack);
         
         mediaRecorder = new MediaRecorder(combinedStream, { 
             mimeType: 'video/webm;codecs=vp8,opus',
@@ -1593,6 +1725,8 @@ async function startRecording() {
                 audioContext.close();
                 audioContext = null;
             }
+
+            stopRecordingRenderer();
             
             // Broadcast recording stopped
             peersData.forEach(p => { if(p.connection) p.connection.send({type: 'recording-state', state: false}); });
@@ -1613,6 +1747,14 @@ async function startRecording() {
 
     } catch (err) {
         console.error("Error starting recording:", err);
+        stopRecordingRenderer();
+        if (audioContext) {
+            audioContext.close();
+            audioContext = null;
+        }
+        if (!reusedScreenShare && recordingVideoStream) {
+            recordingVideoStream.getTracks().forEach(track => track.stop());
+        }
         alert("Could not start recording. If nobody is presenting, the host device may need its own screen capture permission.");
     }
 }
@@ -1621,13 +1763,14 @@ function stopRecording() {
     if (mediaRecorder && mediaRecorder.state !== 'inactive') {
         mediaRecorder.stop();
         
-        // Always stop the mixed audio track
-        mediaRecorder.stream.getAudioTracks().forEach(track => track.stop());
+        mediaRecorder.stream.getTracks().forEach(track => track.stop());
         
         // Only stop the video track if we didn't reuse it from screen share
         if (!reusedScreenShare && recordingVideoStream) {
             recordingVideoStream.getVideoTracks().forEach(track => track.stop());
         }
+    } else {
+        stopRecordingRenderer();
     }
 }
 
