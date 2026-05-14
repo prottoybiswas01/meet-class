@@ -104,6 +104,7 @@ function init() {
     setPresentationLayout(false);
     setRecordingUI(false);
     setScreenShareButtonState(false);
+    syncViewportSizeVars();
 
     const hash = window.location.hash.substring(1);
     if (hash) {
@@ -121,9 +122,16 @@ function init() {
     }
     setupEventListeners();
     window.addEventListener('resize', () => {
+        syncViewportSizeVars();
         syncSidebarForViewport();
         syncPresentationViewportMode(Boolean(currentSharer), currentSharerRole);
     });
+    if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', () => {
+            syncViewportSizeVars();
+            syncPresentationViewportMode(Boolean(currentSharer), currentSharerRole);
+        });
+    }
 }
 
 function showScreen(screenName) {
@@ -176,6 +184,15 @@ function isDesktopViewport() {
     return window.innerWidth >= 768;
 }
 
+function isPortraitViewport() {
+    return window.innerHeight > window.innerWidth;
+}
+
+function syncViewportSizeVars() {
+    document.documentElement.style.setProperty('--app-vw', `${window.innerWidth}px`);
+    document.documentElement.style.setProperty('--app-vh', `${window.innerHeight}px`);
+}
+
 function getLocalRoleKey() {
     if (isAdmin) return 'host';
     if (isCoHost) return 'cohost';
@@ -211,7 +228,9 @@ function releaseLandscapePresentationLock() {
 
 function syncPresentationViewportMode(active = Boolean(currentSharer), sharerRole = currentSharerRole) {
     const shouldPrioritizeStage = active && !isDesktopViewport() && isHostLikeRole(sharerRole);
+    const shouldForceLandscape = shouldPrioritizeStage && isPortraitViewport();
     document.body.classList.toggle('mobile-stage-priority', shouldPrioritizeStage);
+    document.body.classList.toggle('mobile-forced-landscape', shouldForceLandscape);
 
     if (shouldPrioritizeStage) {
         tryLockLandscapePresentation();
@@ -219,6 +238,33 @@ function syncPresentationViewportMode(active = Boolean(currentSharer), sharerRol
     }
 
     releaseLandscapePresentationLock();
+}
+
+function updatePeerRole(peerId, role) {
+    if (!peerId || !role) return;
+
+    const peerData = peersData.get(peerId);
+    if (peerData) {
+        peerData.role = role;
+    }
+
+    if (currentSharer === peerId) {
+        currentSharerRole = role;
+        syncPresentationViewportMode(true, currentSharerRole);
+        updateVideoGridLayout();
+    }
+}
+
+function broadcastPeerRoleUpdate(peerId, role) {
+    peersData.forEach((peerData, id) => {
+        if (id === peerId || !peerData.connection) return;
+
+        peerData.connection.send({
+            type: 'peer-role-update',
+            peerId,
+            role
+        });
+    });
 }
 
 function syncSidebarForViewport() {
@@ -666,8 +712,8 @@ async function initializePeer() {
             inputInviteLink.value = buildInviteLink(id);
         } else {
             // User joins Admin
-            const conn = peer.connect(adminPeerId, {metadata: {name: myName}});
-            peersData.set(adminPeerId, {name: "Host", connection: conn});
+            const conn = peer.connect(adminPeerId, {metadata: {name: myName, role: getLocalRoleKey()}});
+            peersData.set(adminPeerId, {name: "Host", connection: conn, role: 'host'});
             
             conn.on('open', () => conn.send({ type: 'request-join', name: myName }));
             setupConnectionListeners(conn);
@@ -677,6 +723,7 @@ async function initializePeer() {
     peer.on('connection', (conn) => {
         // Handle incoming data connections
         const remoteName = conn.metadata ? conn.metadata.name : "User";
+        const remoteRole = conn.metadata ? conn.metadata.role : 'participant';
         
         if (isAdmin && !peersData.has(conn.peer)) {
             // New join request
@@ -695,9 +742,10 @@ async function initializePeer() {
         } else {
             // Full Mesh: peer connecting directly
             if (!peersData.has(conn.peer)) {
-                peersData.set(conn.peer, {name: remoteName, connection: conn});
+                peersData.set(conn.peer, {name: remoteName, connection: conn, role: remoteRole || 'participant'});
             } else {
                 peersData.get(conn.peer).connection = conn;
+                if (remoteRole) peersData.get(conn.peer).role = remoteRole;
             }
             setupConnectionListeners(conn);
         }
@@ -732,7 +780,9 @@ async function initializePeer() {
         const remoteName = call.metadata ? call.metadata.name : "User";
         
         if (!peersData.has(call.peer)) {
-            peersData.set(call.peer, {name: remoteName});
+            peersData.set(call.peer, {name: remoteName, role: call.metadata?.role || 'participant'});
+        } else if (call.metadata?.role) {
+            peersData.get(call.peer).role = call.metadata.role;
         }
         setupCallListeners(call, remoteName);
     });
@@ -759,11 +809,17 @@ function setupConnectionListeners(conn) {
             window.location.reload();
         } else if (data.type === 'new-peer') {
             // Just register their info, wait for them to connect
-            if (!peersData.has(data.id)) peersData.set(data.id, {name: data.name});
+            if (!peersData.has(data.id)) {
+                peersData.set(data.id, {name: data.name, role: data.role || 'participant'});
+            } else if (data.role) {
+                peersData.get(data.id).role = data.role;
+            }
         } else if (data.type === 'screen-share-start') {
             handleScreenShareStart(conn.peer, data.role);
         } else if (data.type === 'screen-share-stop') {
             handleScreenShareStop(conn.peer);
+        } else if (data.type === 'peer-role-update') {
+            updatePeerRole(data.peerId, data.role);
         } else if (data.type === 'video-toggle') {
             conn.currentVideoEnabled = data.enabled;
             const participant = peersData.get(conn.peer);
@@ -811,8 +867,10 @@ function setupConnectionListeners(conn) {
 function setupCallListeners(call, name) {
     let pData = peersData.get(call.peer);
     if (!pData) {
-        pData = {name: name};
+        pData = {name: name, role: call.metadata?.role || 'participant'};
         peersData.set(call.peer, pData);
+    } else if (call.metadata?.role) {
+        pData.role = call.metadata.role;
     }
     pData.call = call;
 
@@ -875,7 +933,9 @@ window.approveUser = function(peerId) {
     // Send active peer list to new user
     const currentPeers = [];
     peersData.forEach((d, id) => {
-        if (d.connection && id !== adminPeerId && id !== peerId) currentPeers.push({id, name: d.name});
+        if (d.connection && id !== adminPeerId && id !== peerId) {
+            currentPeers.push({id, name: d.name, role: d.role || 'participant'});
+        }
     });
 
     req.conn.send({ type: 'approved', peers: currentPeers });
@@ -885,13 +945,14 @@ window.approveUser = function(peerId) {
     peersData.set(peerId, {
         name: req.name,
         connection: req.conn,
-        isVideoEnabled: req.isVideoEnabled !== false
+        isVideoEnabled: req.isVideoEnabled !== false,
+        role: 'participant'
     });
     
     // Broadcast new user to existing peers
     peersData.forEach((d, id) => {
         if (d.connection && id !== peerId && id !== adminPeerId) {
-            d.connection.send({ type: 'new-peer', id: peerId, name: req.name });
+            d.connection.send({ type: 'new-peer', id: peerId, name: req.name, role: 'participant' });
         }
     });
 
@@ -904,6 +965,7 @@ window.approveUser = function(peerId) {
         const call = peer.call(peerId, getActiveStream(), {
             metadata: {
                 name: myName,
+                role: getLocalRoleKey(),
                 type: 'approved',
                 peers: currentPeers
             }
@@ -963,10 +1025,10 @@ function handleApproved(roomPeers) {
     // However, we need to call other existing peers in the room.
     roomPeers.forEach(p => {
         // Connect Data
-        const conn = peer.connect(p.id, {metadata: {name: myName}});
+        const conn = peer.connect(p.id, {metadata: {name: myName, role: getLocalRoleKey()}});
         let pData = peersData.get(p.id);
         if (!pData) {
-            pData = {name: p.name};
+            pData = {name: p.name, role: p.role || 'participant'};
             peersData.set(p.id, pData);
         }
         pData.connection = conn;
@@ -974,7 +1036,7 @@ function handleApproved(roomPeers) {
         
         // Connect Media
         setTimeout(() => {
-            const call = peer.call(p.id, getActiveStream(), {metadata: {name: myName}});
+            const call = peer.call(p.id, getActiveStream(), {metadata: {name: myName, role: getLocalRoleKey()}});
             setupCallListeners(call, p.name);
         }, 500);
     });
@@ -1082,6 +1144,8 @@ function addAdminControlsToContainer(container, id) {
             const pData = peersData.get(id);
             if(pData && pData.connection) {
                 pData.connection.send({ type: 'make-cohost' });
+                pData.role = 'cohost';
+                broadcastPeerRoleUpdate(id, 'cohost');
                 alert(pData.name + " is now a Co-Host!");
                 hostBtn.remove();
             }
@@ -1295,7 +1359,7 @@ function handleScreenShareStart(peerId, sharerRole = 'participant') {
     if (!peerData || !peerData.stream) return;
     
     currentSharer = peerId;
-    currentSharerRole = sharerRole || 'participant';
+    currentSharerRole = sharerRole || peerData.role || 'participant';
     focusVideo.srcObject = peerData.stream;
     focusName.innerText = peerData.name + " (Screen)";
     setPresentationLayout(true, peerData.name, false, currentSharerRole);

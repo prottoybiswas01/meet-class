@@ -423,6 +423,73 @@
             width: 10.25rem;
         }
 
+        body.mobile-forced-landscape {
+            overflow: hidden;
+            background: #020617;
+        }
+
+        body.mobile-forced-landscape #meeting-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: var(--app-vh, 100dvh);
+            height: var(--app-vw, 100vw);
+            transform-origin: top left;
+            transform: translateY(var(--app-vh, 100dvh)) rotate(90deg);
+            z-index: 80;
+        }
+
+        body.mobile-forced-landscape #meeting-screen > main {
+            min-height: 0;
+        }
+
+        body.mobile-forced-landscape #video-area {
+            flex-direction: row;
+            align-items: stretch;
+            gap: 0.85rem;
+            overflow: hidden;
+        }
+
+        body.mobile-forced-landscape #focus-panel {
+            flex: 1 1 auto;
+            min-width: 0;
+        }
+
+        body.mobile-forced-landscape #focus-container {
+            height: 100%;
+            min-height: 0;
+            max-height: none;
+        }
+
+        body.mobile-forced-landscape #participants-panel,
+        body.mobile-forced-landscape #participants-panel.presenting-layout {
+            flex: 0 0 12.75rem;
+            min-width: 0;
+            min-height: 0;
+        }
+
+        body.mobile-forced-landscape #participants-panel .participants-header {
+            margin-bottom: 0.45rem;
+        }
+
+        body.mobile-forced-landscape #video-grid.share-mode {
+            flex-direction: column;
+            overflow-y: auto;
+            overflow-x: hidden;
+            padding-right: 0.15rem;
+            padding-bottom: 0;
+        }
+
+        body.mobile-forced-landscape #video-grid.share-mode .video-container {
+            width: 100%;
+            min-height: 0;
+            aspect-ratio: 16 / 10;
+        }
+
+        body.mobile-forced-landscape #meeting-footer .footer-inner {
+            max-width: min(100%, 30rem);
+        }
+
         @media (max-width: 768px) {
             #meeting-screen {
                 padding-bottom: calc(6.85rem + env(safe-area-inset-bottom));
