@@ -86,10 +86,12 @@ let isRecording = false;
 let isScreenSharing = false;
 let screenStream = null;
 let currentSharer = null;
+let currentSharerRole = null;
 
 let audioContext;
 let audioDestination;
 let reconnectTimer = null;
+let orientationLockRequested = false;
 
 // === Initialization ===
 function init() {
@@ -106,6 +108,7 @@ function init() {
     const hash = window.location.hash.substring(1);
     if (hash) {
         adminPeerId = hash;
+        document.body.classList.add('invite-entry-mode');
         btnShowAdminLogin.classList.add('hidden');
         
         // Show preview and start camera immediately for privacy check before joining
@@ -113,9 +116,14 @@ function init() {
             previewSection.classList.remove('hidden');
             startLocalVideo();
         }
+    } else {
+        document.body.classList.remove('invite-entry-mode');
     }
     setupEventListeners();
-    window.addEventListener('resize', syncSidebarForViewport);
+    window.addEventListener('resize', () => {
+        syncSidebarForViewport();
+        syncPresentationViewportMode(Boolean(currentSharer), currentSharerRole);
+    });
 }
 
 function showScreen(screenName) {
@@ -166,6 +174,51 @@ function schedulePeerReconnect() {
 
 function isDesktopViewport() {
     return window.innerWidth >= 768;
+}
+
+function getLocalRoleKey() {
+    if (isAdmin) return 'host';
+    if (isCoHost) return 'cohost';
+    return 'participant';
+}
+
+function isHostLikeRole(role) {
+    return role === 'host' || role === 'cohost';
+}
+
+async function tryLockLandscapePresentation() {
+    if (orientationLockRequested || !screen.orientation || !screen.orientation.lock) return;
+
+    try {
+        await screen.orientation.lock('landscape');
+        orientationLockRequested = true;
+    } catch (err) {
+        console.debug('Orientation lock not available:', err);
+    }
+}
+
+function releaseLandscapePresentationLock() {
+    if (!screen.orientation || !screen.orientation.unlock) return;
+
+    try {
+        screen.orientation.unlock();
+    } catch (err) {
+        console.debug('Orientation unlock not available:', err);
+    }
+
+    orientationLockRequested = false;
+}
+
+function syncPresentationViewportMode(active = Boolean(currentSharer), sharerRole = currentSharerRole) {
+    const shouldPrioritizeStage = active && !isDesktopViewport() && isHostLikeRole(sharerRole);
+    document.body.classList.toggle('mobile-stage-priority', shouldPrioritizeStage);
+
+    if (shouldPrioritizeStage) {
+        tryLockLandscapePresentation();
+        return;
+    }
+
+    releaseLandscapePresentationLock();
 }
 
 function syncSidebarForViewport() {
@@ -336,7 +389,9 @@ function updateVideoGridLayout() {
     if (isPresenting) {
         videoAreaGrid.classList.add('share-mode');
         if (gridCopy) {
-            gridCopy.textContent = 'Presenter on stage. Cameras stay fixed below.';
+            gridCopy.textContent = isHostLikeRole(currentSharerRole)
+                ? 'Presentation stays large. Cameras stay readable below.'
+                : 'Presenter on stage. Cameras stay fixed below.';
         }
         return;
     }
@@ -347,7 +402,7 @@ function updateVideoGridLayout() {
     }
 }
 
-function setPresentationLayout(active, sharerName = '', isLocalSharer = false) {
+function setPresentationLayout(active, sharerName = '', isLocalSharer = false, sharerRole = null) {
     if (focusPlaceholder) {
         focusPlaceholder.classList.toggle('hidden', active);
     }
@@ -357,6 +412,7 @@ function setPresentationLayout(active, sharerName = '', isLocalSharer = false) {
     }
 
     if (active) {
+        currentSharerRole = sharerRole || currentSharerRole || (isLocalSharer ? getLocalRoleKey() : 'participant');
         const stageLabel = isLocalSharer ? 'You are presenting' : `${sharerName} is presenting`;
         if (stageTitle) {
             stageTitle.textContent = stageLabel;
@@ -369,9 +425,13 @@ function setPresentationLayout(active, sharerName = '', isLocalSharer = false) {
         if (presenterChip) {
             presenterChip.innerHTML = `<i class="fa-solid fa-display text-brand-400"></i> ${stageLabel}`;
         }
+        syncPresentationViewportMode(true, currentSharerRole);
         updateVideoGridLayout();
         return;
     }
+
+    currentSharerRole = null;
+    syncPresentationViewportMode(false);
 
     if (focusVideo) {
         focusVideo.srcObject = null;
@@ -701,7 +761,7 @@ function setupConnectionListeners(conn) {
             // Just register their info, wait for them to connect
             if (!peersData.has(data.id)) peersData.set(data.id, {name: data.name});
         } else if (data.type === 'screen-share-start') {
-            handleScreenShareStart(conn.peer);
+            handleScreenShareStart(conn.peer, data.role);
         } else if (data.type === 'screen-share-stop') {
             handleScreenShareStop(conn.peer);
         } else if (data.type === 'video-toggle') {
@@ -727,6 +787,10 @@ function setupConnectionListeners(conn) {
             btnRecord.classList.add('flex');
             setMeetingRoleUI();
             setRecordButtonState(isRecording);
+            if (currentSharer === 'local' && isScreenSharing) {
+                currentSharerRole = getLocalRoleKey();
+                syncPresentationViewportMode(true, currentSharerRole);
+            }
             // Re-render admin controls for existing videos
             document.querySelectorAll('#video-grid .video-container').forEach(container => {
                 const vidId = container.id.replace('video-container-', '');
@@ -1032,6 +1096,7 @@ function addAdminControlsToContainer(container, id) {
 function removeUser(id) {
     if (currentSharer === id) {
         currentSharer = null;
+        currentSharerRole = null;
         setPresentationLayout(false);
     }
 
@@ -1169,17 +1234,23 @@ async function toggleScreenShare() {
 
             isScreenSharing = true;
             currentSharer = 'local';
+            currentSharerRole = getLocalRoleKey();
             setScreenShareButtonState(true);
 
             // Broadcast
             peersData.forEach(p => {
-                if (p.connection) p.connection.send({type: 'screen-share-start'});
+                if (p.connection) {
+                    p.connection.send({
+                        type: 'screen-share-start',
+                        role: currentSharerRole
+                    });
+                }
             });
 
             // Local layout update
             focusVideo.srcObject = screenStream;
             focusName.innerText = "You (Screen)";
-            setPresentationLayout(true, myName || 'You', true);
+            setPresentationLayout(true, myName || 'You', true, currentSharerRole);
 
             screenTrack.onended = () => { if (isScreenSharing) stopScreenShare(); };
         } catch (err) {
@@ -1200,7 +1271,10 @@ function stopScreenShare() {
     screenStream.getTracks().forEach(track => track.stop());
     screenStream = null;
     isScreenSharing = false;
-    if (currentSharer === 'local') currentSharer = null;
+    if (currentSharer === 'local') {
+        currentSharer = null;
+        currentSharerRole = null;
+    }
     setScreenShareButtonState(false);
 
     // Revert track for all calls
@@ -1216,14 +1290,15 @@ function stopScreenShare() {
     setPresentationLayout(false);
 }
 
-function handleScreenShareStart(peerId) {
+function handleScreenShareStart(peerId, sharerRole = 'participant') {
     const peerData = peersData.get(peerId);
     if (!peerData || !peerData.stream) return;
     
     currentSharer = peerId;
+    currentSharerRole = sharerRole || 'participant';
     focusVideo.srcObject = peerData.stream;
     focusName.innerText = peerData.name + " (Screen)";
-    setPresentationLayout(true, peerData.name, false);
+    setPresentationLayout(true, peerData.name, false, currentSharerRole);
 }
 
 function handleScreenShareStop(peerId) {
@@ -1231,10 +1306,12 @@ function handleScreenShareStop(peerId) {
     if (currentSharer !== peerId) return;
     
     currentSharer = null;
+    currentSharerRole = null;
     setPresentationLayout(false);
 }
 
 function leaveMeeting() {
+    syncPresentationViewportMode(false);
     if (localStream) localStream.getTracks().forEach(t => t.stop());
     if (peer) peer.destroy();
     window.location.reload();
