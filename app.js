@@ -114,6 +114,12 @@ let reconnectTimer = null;
 let orientationLockRequested = false;
 let isManualStageFullscreen = false;
 let stageControlsHideTimer = null;
+let meetingClosed = false;
+const HEARTBEAT_INTERVAL_MS = 10000;
+const HEARTBEAT_TIMEOUT_MS = 30000;
+const MEDIA_RETRY_DELAY_MS = 3000;
+const connectionHeartbeatTimers = new Map();
+const mediaRetryTimers = new Map();
 
 // === Initialization ===
 function init() {
@@ -166,6 +172,193 @@ function buildInviteLink(peerId) {
     const url = new URL(window.location.href);
     url.hash = peerId;
     return url.toString();
+}
+
+function getCurrentPresentationState() {
+    if (!currentSharer) return null;
+
+    const isLocalSharer = currentSharer === 'local';
+    const sharerPeerId = isLocalSharer ? peer?.id : currentSharer;
+    if (!sharerPeerId) return null;
+
+    const remotePeerData = isLocalSharer ? null : peersData.get(currentSharer);
+    return {
+        peerId: sharerPeerId,
+        sharerName: isLocalSharer ? (myName || 'You') : (remotePeerData?.name || 'Presenter'),
+        role: isLocalSharer
+            ? getLocalRoleKey()
+            : (currentSharerRole || remotePeerData?.role || 'participant')
+    };
+}
+
+function syncFocusVideoFromPresentationState(presentation) {
+    if (!focusVideo || !presentation?.peerId) return;
+
+    const isLocalSharer = peer?.id && presentation.peerId === peer.id;
+    const targetStream = isLocalSharer
+        ? screenStream
+        : peersData.get(presentation.peerId)?.stream;
+
+    if (!targetStream) return;
+
+    focusVideo.srcObject = targetStream;
+    focusVideo.play().catch(err => console.error('Focus video play failed:', err));
+    requestAnimationFrame(updateStageViewportSizing);
+}
+
+function applyPresentationState(presentation) {
+    if (!presentation?.peerId) return;
+
+    const isLocalSharer = peer?.id && presentation.peerId === peer.id;
+    if (isScreenSharing && currentSharer === 'local' && !isLocalSharer) {
+        return;
+    }
+
+    currentSharer = isLocalSharer ? 'local' : presentation.peerId;
+    currentSharerRole = presentation.role || 'participant';
+
+    setPresentationLayout(true, presentation.sharerName || 'Presenter', isLocalSharer, currentSharerRole);
+    if (focusName) {
+        focusName.innerText = `${presentation.sharerName || (isLocalSharer ? 'You' : 'Presenter')} (Screen)`;
+    }
+
+    syncFocusVideoFromPresentationState(presentation);
+}
+
+function sendCurrentPresentationState(conn) {
+    if (!conn || !conn.open) return;
+
+    const presentation = getCurrentPresentationState();
+    if (!presentation) return;
+
+    conn.send({
+        type: 'presentation-state',
+        presentation
+    });
+}
+
+function stopConnectionHeartbeat(peerId) {
+    if (!connectionHeartbeatTimers.has(peerId)) return;
+    clearInterval(connectionHeartbeatTimers.get(peerId));
+    connectionHeartbeatTimers.delete(peerId);
+}
+
+function markConnectionAlive(conn) {
+    if (!conn) return;
+    conn.lastSeenAt = Date.now();
+}
+
+function endMeetingSession(reason = 'Meeting ended by host.') {
+    if (meetingClosed) return;
+    meetingClosed = true;
+
+    if (reason) {
+        alert(reason);
+    }
+
+    if (localStream) {
+        localStream.getTracks().forEach(track => track.stop());
+    }
+
+    if (peer && !peer.destroyed) {
+        try {
+            peer.destroy();
+        } catch (err) {
+            console.debug('Peer destroy skipped during endMeetingSession:', err);
+        }
+    }
+
+    window.location.reload();
+}
+
+function broadcastMeetingEnded(reason = 'Meeting ended by host.') {
+    peersData.forEach(peerData => {
+        if (peerData.connection?.open) {
+            peerData.connection.send({ type: 'meeting-ended', reason });
+        }
+    });
+
+    pendingRequests.forEach(request => {
+        if (request.conn?.open) {
+            request.conn.send({ type: 'meeting-ended', reason });
+        }
+    });
+}
+
+function startConnectionHeartbeat(conn) {
+    if (!conn?.peer) return;
+
+    stopConnectionHeartbeat(conn.peer);
+    markConnectionAlive(conn);
+
+    const timer = setInterval(() => {
+        if (!conn.open) return;
+
+        try {
+            conn.send({ type: 'heartbeat', ts: Date.now() });
+        } catch (err) {
+            console.debug('Heartbeat send failed:', err);
+        }
+
+        if (!isAdmin && conn.peer === adminPeerId) {
+            const lastSeenAt = conn.lastSeenAt || 0;
+            if (Date.now() - lastSeenAt > HEARTBEAT_TIMEOUT_MS) {
+                endMeetingSession('Host disconnected. Meeting ended.');
+            }
+        }
+    }, HEARTBEAT_INTERVAL_MS);
+
+    connectionHeartbeatTimers.set(conn.peer, timer);
+}
+
+function stopMediaReconnect(peerId) {
+    if (!mediaRetryTimers.has(peerId)) return;
+    clearTimeout(mediaRetryTimers.get(peerId));
+    mediaRetryTimers.delete(peerId);
+}
+
+function createCallMetadata(extra = {}) {
+    return {
+        name: myName,
+        role: getLocalRoleKey(),
+        ...extra
+    };
+}
+
+function scheduleMediaReconnect(peerId) {
+    if (!peerId || !peer || peer.destroyed || mediaRetryTimers.has(peerId)) return;
+
+    const peerData = peersData.get(peerId);
+    if (!peerData?.shouldInitiateCalls || !peerData.connection?.open) return;
+
+    const timer = setTimeout(() => {
+        mediaRetryTimers.delete(peerId);
+
+        const latestPeerData = peersData.get(peerId);
+        if (!latestPeerData?.shouldInitiateCalls || !latestPeerData.connection?.open || !peer || peer.destroyed) {
+            return;
+        }
+
+        const connectionState = latestPeerData.call?.peerConnection?.connectionState;
+        const iceState = latestPeerData.call?.peerConnection?.iceConnectionState;
+        const looksBroken = ['failed', 'disconnected'].includes(connectionState)
+            || ['failed', 'disconnected'].includes(iceState);
+
+        if (!latestPeerData.call || looksBroken) {
+            try {
+                latestPeerData.call?.close();
+            } catch (err) {
+                console.debug('Previous call close skipped before retry:', err);
+            }
+
+            const retryCall = peer.call(peerId, getActiveStream(), {
+                metadata: createCallMetadata()
+            });
+            setupCallListeners(retryCall, latestPeerData.name || 'User', { initiatedLocally: true });
+        }
+    }, MEDIA_RETRY_DELAY_MS);
+
+    mediaRetryTimers.set(peerId, timer);
 }
 
 async function copyTextToClipboard(text) {
@@ -959,6 +1152,11 @@ function setupEventListeners() {
     document.addEventListener('touchstart', unlockRemoteAudioPlayback, { passive: true, once: true });
     document.addEventListener('fullscreenchange', handleBrowserFullscreenChange);
     document.addEventListener('webkitfullscreenchange', handleBrowserFullscreenChange);
+    window.addEventListener('pagehide', () => {
+        if (isAdmin && !meetingClosed) {
+            broadcastMeetingEnded('Meeting ended by host.');
+        }
+    });
 
     if (btnStageFullscreenEnter) {
         btnStageFullscreenEnter.addEventListener('click', event => {
@@ -1210,7 +1408,7 @@ async function initializePeer() {
         // --- BULLETPROOF APPROVAL FALLBACK ---
         // If the data channel dropped the 'approved' message, the media call metadata will still deliver it!
         if (call.metadata && call.metadata.type === 'approved' && !isAdmin) {
-            handleApproved(call.metadata.peers);
+            handleApproved(call.metadata.peers, call.metadata.presentation);
         }
 
         // Handle incoming media calls using the current active stream (camera or screen share)
@@ -1223,15 +1421,24 @@ async function initializePeer() {
         } else if (call.metadata?.role) {
             peersData.get(call.peer).role = call.metadata.role;
         }
-        setupCallListeners(call, remoteName);
+        setupCallListeners(call, remoteName, { initiatedLocally: false });
     });
 }
 
 function setupConnectionListeners(conn) {
-    conn.on('open', () => sendCurrentMediaState(conn));
-    if (conn.open) sendCurrentMediaState(conn);
+    const syncConnectionState = () => {
+        markConnectionAlive(conn);
+        sendCurrentMediaState(conn);
+        sendCurrentPresentationState(conn);
+        startConnectionHeartbeat(conn);
+    };
+
+    conn.on('open', syncConnectionState);
+    if (conn.open) syncConnectionState();
 
     conn.on('data', data => {
+        markConnectionAlive(conn);
+
         if (data.type === 'request-join' && isAdmin) {
             if (!peersData.has(conn.peer)) {
                 pendingRequests.set(conn.peer, {
@@ -1241,8 +1448,10 @@ function setupConnectionListeners(conn) {
                 });
                 updateRequestsUI();
             }
+        } else if (data.type === 'heartbeat') {
+            return;
         } else if (data.type === 'approved' && !isAdmin) {
-            handleApproved(data.peers);
+            handleApproved(data.peers, data.presentation);
         } else if (data.type === 'rejected' && !isAdmin) {
             alert("Your request to join was rejected by the admin.");
             window.location.reload();
@@ -1253,10 +1462,14 @@ function setupConnectionListeners(conn) {
             } else if (data.role) {
                 peersData.get(data.id).role = data.role;
             }
+        } else if (data.type === 'presentation-state') {
+            applyPresentationState(data.presentation);
         } else if (data.type === 'screen-share-start') {
             handleScreenShareStart(conn.peer, data.role);
         } else if (data.type === 'screen-share-stop') {
             handleScreenShareStop(conn.peer);
+        } else if (data.type === 'meeting-ended') {
+            endMeetingSession(data.reason || 'Meeting ended by host.');
         } else if (data.type === 'peer-role-update') {
             updatePeerRole(data.peerId, data.role);
         } else if (data.type === 'video-toggle') {
@@ -1300,10 +1513,13 @@ function setupConnectionListeners(conn) {
         }
     });
 
-    conn.on('close', () => removeUser(conn.peer));
+    conn.on('close', () => {
+        stopConnectionHeartbeat(conn.peer);
+        removeUser(conn.peer);
+    });
 }
 
-function setupCallListeners(call, name) {
+function setupCallListeners(call, name, options = {}) {
     let pData = peersData.get(call.peer);
     if (!pData) {
         pData = {name: name, role: call.metadata?.role || 'participant'};
@@ -1311,12 +1527,34 @@ function setupCallListeners(call, name) {
     } else if (call.metadata?.role) {
         pData.role = call.metadata.role;
     }
+
+    if (options.initiatedLocally) {
+        pData.shouldInitiateCalls = true;
+    } else if (typeof pData.shouldInitiateCalls === 'undefined') {
+        pData.shouldInitiateCalls = false;
+    }
+
     pData.call = call;
+
+    const peerConnection = call.peerConnection;
+    const handleTransportStateChange = () => {
+        const connectionState = peerConnection?.connectionState;
+        const iceState = peerConnection?.iceConnectionState;
+        if (['failed', 'disconnected'].includes(connectionState) || ['failed', 'disconnected'].includes(iceState)) {
+            scheduleMediaReconnect(call.peer);
+        }
+    };
+
+    if (peerConnection) {
+        peerConnection.addEventListener('connectionstatechange', handleTransportStateChange);
+        peerConnection.addEventListener('iceconnectionstatechange', handleTransportStateChange);
+    }
 
     call.on('stream', stream => {
         // Removed stream.id check: PeerJS sometimes fires stream event multiple times (e.g. video then audio).
         // By passing it to addVideoStream, we ensure the latest stream with all tracks is attached.
         pData.stream = stream;
+        stopMediaReconnect(call.peer);
         addVideoStream(call.peer, stream, name);
         
         // If recording is active, plug this new stream into the mix
@@ -1324,7 +1562,14 @@ function setupCallListeners(call, name) {
             connectRecordingAudioSource(`peer:${call.peer}`, stream);
         }
     });
-    call.on('close', () => removeUser(call.peer));
+    call.on('error', () => scheduleMediaReconnect(call.peer));
+    call.on('close', () => {
+        if (peerConnection) {
+            peerConnection.removeEventListener('connectionstatechange', handleTransportStateChange);
+            peerConnection.removeEventListener('iceconnectionstatechange', handleTransportStateChange);
+        }
+        removeUser(call.peer);
+    });
 }
 
 // === Admin Approval Flow ===
@@ -1370,13 +1615,14 @@ window.approveUser = function(peerId) {
 
     // Send active peer list to new user
     const currentPeers = [];
+    const activePresentation = getCurrentPresentationState();
     peersData.forEach((d, id) => {
         if (d.connection && id !== adminPeerId && id !== peerId) {
             currentPeers.push({id, name: d.name, role: d.role || 'participant'});
         }
     });
 
-    req.conn.send({ type: 'approved', peers: currentPeers });
+    req.conn.send({ type: 'approved', peers: currentPeers, presentation: activePresentation });
     
     // Attach connection listeners now that they are approved
     setupConnectionListeners(req.conn);
@@ -1401,14 +1647,13 @@ window.approveUser = function(peerId) {
     // We pass the approval info in the metadata as a bulletproof fallback in case the Data Channel drops the message.
     setTimeout(() => {
         const call = peer.call(peerId, getActiveStream(), {
-            metadata: {
-                name: myName,
-                role: getLocalRoleKey(),
+            metadata: createCallMetadata({
                 type: 'approved',
-                peers: currentPeers
-            }
+                peers: currentPeers,
+                presentation: activePresentation
+            })
         });
-        setupCallListeners(call, req.name);
+        setupCallListeners(call, req.name, { initiatedLocally: true });
     }, 500);
 };
 
@@ -1451,7 +1696,7 @@ function updateActiveCount() {
 // === User Approved Flow ===
 let isApproved = false;
 
-function handleApproved(roomPeers) {
+function handleApproved(roomPeers, presentation = null) {
     if (isApproved) return;
     isApproved = true;
     
@@ -1474,10 +1719,14 @@ function handleApproved(roomPeers) {
         
         // Connect Media
         setTimeout(() => {
-            const call = peer.call(p.id, getActiveStream(), {metadata: {name: myName, role: getLocalRoleKey()}});
-            setupCallListeners(call, p.name);
+            const call = peer.call(p.id, getActiveStream(), {metadata: createCallMetadata()});
+            setupCallListeners(call, p.name, { initiatedLocally: true });
         }, 500);
     });
+
+    if (presentation) {
+        applyPresentationState(presentation);
+    }
 }
 
 // === Shared Video & Controls Functions ===
@@ -1585,6 +1834,9 @@ function addAdminControlsToContainer(container, id) {
 }
 
 function removeUser(id) {
+    stopConnectionHeartbeat(id);
+    stopMediaReconnect(id);
+
     if (currentSharer === id) {
         currentSharer = null;
         currentSharerRole = null;
@@ -1600,8 +1852,7 @@ function removeUser(id) {
     updateActiveCount();
     
     if (id === adminPeerId && !isAdmin) {
-        alert("Meeting ended by host.");
-        window.location.reload();
+        endMeetingSession('Meeting ended by host.');
     }
 }
 
@@ -1816,9 +2067,16 @@ function handleScreenShareStop(peerId) {
 }
 
 function leaveMeeting() {
+    meetingClosed = true;
+
     if (isManualStageFullscreen) {
         applyManualStageFullscreenState(false);
     }
+
+    if (isAdmin) {
+        broadcastMeetingEnded('Meeting ended by host.');
+    }
+
     syncPresentationViewportMode(false);
     if (localStream) localStream.getTracks().forEach(t => t.stop());
     if (peer) peer.destroy();
