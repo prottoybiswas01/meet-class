@@ -104,7 +104,6 @@ function init() {
     setPresentationLayout(false);
     setRecordingUI(false);
     setScreenShareButtonState(false);
-    syncViewportSizeVars();
 
     const hash = window.location.hash.substring(1);
     if (hash) {
@@ -122,16 +121,9 @@ function init() {
     }
     setupEventListeners();
     window.addEventListener('resize', () => {
-        syncViewportSizeVars();
         syncSidebarForViewport();
         syncPresentationViewportMode(Boolean(currentSharer), currentSharerRole);
     });
-    if (window.visualViewport) {
-        window.visualViewport.addEventListener('resize', () => {
-            syncViewportSizeVars();
-            syncPresentationViewportMode(Boolean(currentSharer), currentSharerRole);
-        });
-    }
 }
 
 function showScreen(screenName) {
@@ -184,15 +176,6 @@ function isDesktopViewport() {
     return window.innerWidth >= 768;
 }
 
-function isPortraitViewport() {
-    return window.innerHeight > window.innerWidth;
-}
-
-function syncViewportSizeVars() {
-    document.documentElement.style.setProperty('--app-vw', `${window.innerWidth}px`);
-    document.documentElement.style.setProperty('--app-vh', `${window.innerHeight}px`);
-}
-
 function getLocalRoleKey() {
     if (isAdmin) return 'host';
     if (isCoHost) return 'cohost';
@@ -228,9 +211,7 @@ function releaseLandscapePresentationLock() {
 
 function syncPresentationViewportMode(active = Boolean(currentSharer), sharerRole = currentSharerRole) {
     const shouldPrioritizeStage = active && !isDesktopViewport() && isHostLikeRole(sharerRole);
-    const shouldForceLandscape = shouldPrioritizeStage && isPortraitViewport();
     document.body.classList.toggle('mobile-stage-priority', shouldPrioritizeStage);
-    document.body.classList.toggle('mobile-forced-landscape', shouldForceLandscape);
 
     if (shouldPrioritizeStage) {
         tryLockLandscapePresentation();
