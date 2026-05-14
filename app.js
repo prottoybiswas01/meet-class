@@ -1047,11 +1047,13 @@ async function startRecording() {
             displaySource.connect(audioDestination);
         }
 
-        // Combine the Screen Video Track with the Mixed Audio Track
-        const combinedStream = new MediaStream([
-            recordingVideoStream.getVideoTracks()[0],
-            audioDestination.stream.getAudioTracks()[0]
-        ]);
+        // Combine the screen video track with mixed audio when audio exists.
+        const combinedTracks = [recordingVideoStream.getVideoTracks()[0]];
+        const mixedAudioTrack = audioDestination.stream.getAudioTracks()[0];
+        if (mixedAudioTrack) {
+            combinedTracks.push(mixedAudioTrack);
+        }
+        const combinedStream = new MediaStream(combinedTracks);
         
         mediaRecorder = new MediaRecorder(combinedStream, { 
             mimeType: 'video/webm;codecs=vp8,opus',
@@ -1104,7 +1106,7 @@ async function startRecording() {
 
     } catch (err) {
         console.error("Error starting recording:", err);
-        alert("Could not start recording. Permission denied.");
+        alert("Could not start recording. If nobody is presenting, the host device may need its own screen capture permission.");
     }
 }
 
