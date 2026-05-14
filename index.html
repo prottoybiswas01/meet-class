@@ -195,7 +195,7 @@
         .sidebar-open { transform: translateX(0) !important; }
     </style>
 </head>
-<body class="h-screen w-screen flex flex-col text-slate-100 overflow-hidden">
+<body class="h-screen w-screen flex flex-col text-slate-100 overflow-x-hidden">
 
     <div id="landing-screen" class="flex-1 overflow-auto px-4 py-5 md:px-8 md:py-8">
         <div class="mx-auto min-h-full max-w-7xl">
@@ -376,35 +376,8 @@
             </div>
         </header>
 
-        <main class="flex-1 flex overflow-hidden relative">
-            <div id="video-area" class="flex-1 p-3 md:p-5 flex flex-col gap-4 overflow-hidden h-full">
-                <section class="grid gap-3 xl:grid-cols-[minmax(0,1fr)_320px]">
-                    <div class="panel rounded-[1.75rem] p-4 md:p-5">
-                        <div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-                            <div class="min-w-0">
-                                <p class="eyebrow">Meeting Stage</p>
-                                <h2 id="stage-title" class="mt-2 text-2xl font-bold text-white">Ready for the room</h2>
-                                <p id="stage-copy" class="mt-2 max-w-3xl text-sm leading-6 text-slate-400 md:text-base">
-                                    When someone clicks present, that person's browser should ask for screen-share approval. Everyone else should only receive the shared view.
-                                </p>
-                            </div>
-                            <div class="flex flex-wrap gap-2">
-                                <span id="presenter-chip" class="status-chip"><i class="fa-solid fa-display text-brand-400"></i> No one is presenting</span>
-                                <span id="recording-chip" class="status-chip"><i class="fa-solid fa-circle-dot text-ember-400"></i> Recording idle</span>
-                            </div>
-                        </div>
-                    </div>
-
-                    <aside class="panel rounded-[1.75rem] p-4 md:p-5">
-                        <p class="eyebrow">Flow Notes</p>
-                        <div class="mt-3 space-y-4 text-sm leading-6 text-slate-400">
-                            <p><span class="font-semibold text-slate-200">Presenter:</span> screen-share prompt appears on the device that starts presenting.</p>
-                            <p><span class="font-semibold text-slate-200">Host:</span> can admit users, monitor the room, and save the recording locally.</p>
-                            <p><span class="font-semibold text-slate-200">Viewers:</span> see the stage layout on desktop and a compact stacked version on mobile.</p>
-                        </div>
-                    </aside>
-                </section>
-
+        <main class="flex-1 flex overflow-hidden relative min-h-0">
+            <div id="video-area" class="flex-1 min-h-0 p-3 md:p-5 flex flex-col gap-4 overflow-y-auto overflow-x-hidden">
                 <section class="panel flex min-h-0 flex-1 flex-col rounded-[1.75rem] p-3 md:p-4">
                     <div id="focus-placeholder" class="flex flex-1 items-center justify-center rounded-[1.5rem] border border-dashed border-slate-700/80 bg-slate-950/60 px-6 py-10 text-center">
                         <div class="max-w-xl">
@@ -440,6 +413,13 @@
                         </div>
                     </div>
                 </section>
+
+                <div class="hidden" aria-hidden="true">
+                    <span id="stage-title">Ready for the room</span>
+                    <span id="stage-copy">When someone clicks present, that person's browser should ask for screen-share approval. Everyone else should only receive the shared view.</span>
+                    <span id="presenter-chip">No one is presenting</span>
+                    <span id="recording-chip">Recording idle</span>
+                </div>
             </div>
 
             <div id="admin-sidebar" class="hidden flex absolute right-0 top-0 h-full w-full max-w-[340px] flex-col border-l border-slate-800 bg-slate-950/95 backdrop-blur-xl z-40 transform translate-x-full md:static md:translate-x-0 shadow-[-10px_0_25px_rgba(2,6,23,0.45)]">

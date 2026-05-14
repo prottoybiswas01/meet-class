@@ -175,26 +175,51 @@ function setPresentationLayout(active, sharerName = '', isLocalSharer = false) {
         focusPlaceholder.classList.toggle('hidden', active);
     }
 
-    focusContainer.classList.toggle('hidden', !active);
-    videoAreaGrid.classList.toggle('share-mode', active);
+    if (focusContainer) {
+        focusContainer.classList.toggle('hidden', !active);
+    }
+
+    if (videoAreaGrid) {
+        videoAreaGrid.classList.toggle('share-mode', active);
+    }
 
     if (active) {
         const stageLabel = isLocalSharer ? 'You are presenting' : `${sharerName} is presenting`;
-        stageTitle.textContent = stageLabel;
-        stageCopy.textContent = isLocalSharer
-            ? 'The screen-share approval came from this device. Other users should only receive your presentation feed.'
-            : `${sharerName}'s device granted the screen-share permission. Viewers should see the stage without receiving a local share prompt.`;
-        presenterChip.innerHTML = `<i class="fa-solid fa-display text-brand-400"></i> ${stageLabel}`;
-        gridCopy.textContent = 'Filmstrip mode is active while the presentation stays on stage.';
+        if (stageTitle) {
+            stageTitle.textContent = stageLabel;
+        }
+        if (stageCopy) {
+            stageCopy.textContent = isLocalSharer
+                ? 'The screen-share approval came from this device. Other users should only receive your presentation feed.'
+                : `${sharerName}'s device granted the screen-share permission. Viewers should see the stage without receiving a local share prompt.`;
+        }
+        if (presenterChip) {
+            presenterChip.innerHTML = `<i class="fa-solid fa-display text-brand-400"></i> ${stageLabel}`;
+        }
+        if (gridCopy) {
+            gridCopy.textContent = 'Filmstrip mode is active while the presentation stays on stage.';
+        }
         return;
     }
 
-    focusVideo.srcObject = null;
-    focusName.innerText = 'Presentation Stage';
-    stageTitle.textContent = 'Ready for the room';
-    stageCopy.textContent = 'When someone clicks present, that person\'s browser should ask for screen-share approval. Everyone else should only receive the shared view.';
-    presenterChip.innerHTML = '<i class="fa-solid fa-display text-brand-400"></i> No one is presenting';
-    gridCopy.textContent = 'Grid view in normal mode. Filmstrip view while someone presents.';
+    if (focusVideo) {
+        focusVideo.srcObject = null;
+    }
+    if (focusName) {
+        focusName.innerText = 'Presentation Stage';
+    }
+    if (stageTitle) {
+        stageTitle.textContent = 'Ready for the room';
+    }
+    if (stageCopy) {
+        stageCopy.textContent = 'When someone clicks present, that person\'s browser should ask for screen-share approval. Everyone else should only receive the shared view.';
+    }
+    if (presenterChip) {
+        presenterChip.innerHTML = '<i class="fa-solid fa-display text-brand-400"></i> No one is presenting';
+    }
+    if (gridCopy) {
+        gridCopy.textContent = 'Grid view in normal mode. Filmstrip view while someone presents.';
+    }
 }
 
 async function startLocalVideo() {
