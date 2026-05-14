@@ -89,6 +89,7 @@ let currentSharer = null;
 
 let audioContext;
 let audioDestination;
+let reconnectTimer = null;
 
 // === Initialization ===
 function init() {
@@ -122,6 +123,45 @@ function showScreen(screenName) {
     if (screens[screenName]) {
         screens[screenName].classList.remove('hidden-section');
     }
+}
+
+function buildInviteLink(peerId) {
+    const url = new URL(window.location.href);
+    url.hash = peerId;
+    return url.toString();
+}
+
+async function copyTextToClipboard(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+        return;
+    }
+
+    const tempInput = document.createElement('textarea');
+    tempInput.value = text;
+    tempInput.setAttribute('readonly', '');
+    tempInput.style.position = 'absolute';
+    tempInput.style.left = '-9999px';
+    document.body.appendChild(tempInput);
+    tempInput.select();
+    document.execCommand('copy');
+    document.body.removeChild(tempInput);
+}
+
+function schedulePeerReconnect() {
+    if (!peer || peer.destroyed || reconnectTimer) return;
+
+    reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+
+        if (!peer || peer.destroyed || !peer.disconnected) return;
+
+        try {
+            peer.reconnect();
+        } catch (err) {
+            console.error('Peer reconnect failed:', err);
+        }
+    }, 1500);
 }
 
 function isDesktopViewport() {
@@ -415,10 +455,21 @@ function setupEventListeners() {
         });
     }
 
-    btnCopyLink.addEventListener('click', () => {
-        inputInviteLink.select();
-        document.execCommand('copy');
-        btnCopyLink.innerHTML = '<i class="fa-solid fa-check text-emerald-400"></i><span class="hidden lg:inline">Copied</span>';
+    btnCopyLink.addEventListener('click', async () => {
+        const inviteLink = inputInviteLink.value.trim();
+        if (!inviteLink) {
+            alert('Invite link is not ready yet. Wait a moment and try again.');
+            return;
+        }
+
+        try {
+            await copyTextToClipboard(inviteLink);
+            btnCopyLink.innerHTML = '<i class="fa-solid fa-check text-emerald-400"></i><span class="hidden lg:inline">Copied</span>';
+        } catch (err) {
+            console.error('Copy failed:', err);
+            alert('Could not copy the invite link automatically. Please copy it manually.');
+        }
+
         setTimeout(() => {
             btnCopyLink.innerHTML = '<i class="fa-regular fa-copy"></i><span class="hidden lg:inline">Copy</span>';
         }, 2000);
@@ -545,9 +596,14 @@ async function initializePeer() {
 
     peer.on('open', (id) => {
         console.log('My Peer ID:', id);
+        if (reconnectTimer) {
+            clearTimeout(reconnectTimer);
+            reconnectTimer = null;
+        }
         
         if (isAdmin) {
-            inputInviteLink.value = `${window.location.origin}${window.location.pathname}#${id}`;
+            adminPeerId = id;
+            inputInviteLink.value = buildInviteLink(id);
         } else {
             // User joins Admin
             const conn = peer.connect(adminPeerId, {metadata: {name: myName}});
@@ -594,7 +650,13 @@ async function initializePeer() {
             window.location.reload();
         } else if (err.type === 'network' || err.type === 'disconnected') {
             console.warn("Network issue detected.");
+            schedulePeerReconnect();
         }
+    });
+
+    peer.on('disconnected', () => {
+        console.warn('Peer disconnected from signaling server.');
+        schedulePeerReconnect();
     });
 
     peer.on('call', (call) => {
