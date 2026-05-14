@@ -87,6 +87,7 @@ let isScreenSharing = false;
 let screenStream = null;
 let currentSharer = null;
 let currentSharerRole = null;
+let remoteAudioUnlocked = false;
 
 let audioContext;
 let audioDestination;
@@ -386,6 +387,83 @@ function setParticipantVideoState(id, enabled, fallbackName = 'User') {
     }
 }
 
+function removeRemoteAudioButton(container) {
+    const existingBtn = container?.querySelector('.remote-audio-btn');
+    if (existingBtn) existingBtn.remove();
+}
+
+function showRemoteAudioButton(video, container) {
+    const remoteStream = video?.srcObject;
+    if (!remoteStream || remoteStream.getAudioTracks().length === 0) return;
+    if (!container || container.querySelector('.remote-audio-btn')) return;
+
+    const button = document.createElement('button');
+    button.className = 'remote-audio-btn absolute top-1/2 left-1/2 z-50 -translate-x-1/2 -translate-y-1/2 rounded-full bg-brand-600 px-4 py-2 text-sm font-bold text-white shadow-lg transition hover:bg-brand-500';
+    button.innerHTML = '<i class="fa-solid fa-volume-high"></i> Tap for sound';
+    button.onclick = async () => {
+        remoteAudioUnlocked = true;
+        video.muted = false;
+        video.defaultMuted = false;
+        try {
+            await video.play();
+            removeRemoteAudioButton(container);
+        } catch (err) {
+            console.error('Remote audio unlock failed:', err);
+        }
+    };
+    container.appendChild(button);
+}
+
+async function syncRemoteVideoPlayback(video, container) {
+    if (!video) return;
+
+    video.autoplay = true;
+    video.playsInline = true;
+    video.dataset.remoteVideo = 'true';
+
+    if (!remoteAudioUnlocked) {
+        video.muted = true;
+        video.defaultMuted = true;
+    }
+
+    try {
+        await video.play();
+        if (remoteAudioUnlocked) {
+            video.muted = false;
+            video.defaultMuted = false;
+            await video.play();
+            removeRemoteAudioButton(container);
+        } else {
+            showRemoteAudioButton(video, container);
+        }
+    } catch (err) {
+        console.error('Remote video autoplay blocked:', err);
+        video.muted = true;
+        video.defaultMuted = true;
+        try {
+            await video.play();
+        } catch (playErr) {
+            console.error('Muted remote video playback failed:', playErr);
+        }
+        showRemoteAudioButton(video, container);
+    }
+}
+
+function unlockRemoteAudioPlayback() {
+    if (remoteAudioUnlocked) return;
+    remoteAudioUnlocked = true;
+
+    document.querySelectorAll('video[data-remote-video="true"]').forEach(video => {
+        video.muted = false;
+        video.defaultMuted = false;
+        video.play().catch(err => {
+            console.error('Bulk remote audio unlock failed:', err);
+            const container = video.closest('.video-container');
+            showRemoteAudioButton(video, container);
+        });
+    });
+}
+
 function sendCurrentMediaState(conn) {
     if (!conn || !conn.open) return;
     conn.send({ type: 'video-toggle', enabled: isLocalVideoEnabled });
@@ -482,16 +560,54 @@ async function startLocalVideo() {
     if (localStream) return true; // Already started via preview
     
     try {
-        // Optimize for global/weak networks: Limit resolution to 480p and enable audio optimizations
-        const constraints = {
-            video: {
-                width: { ideal: 1280, max: 1920 },
-                height: { ideal: 720, max: 1080 },
-                frameRate: { ideal: 24, max: 30 }
+        const mediaProfiles = [
+            {
+                video: {
+                    facingMode: 'user',
+                    width: { ideal: 1280, max: 1920 },
+                    height: { ideal: 720, max: 1080 },
+                    frameRate: { ideal: 24, max: 30 }
+                },
+                audio: true
             },
-            audio: true // Simplified to avoid device-specific audio constraint failures
-        };
-        localStream = await navigator.mediaDevices.getUserMedia(constraints);
+            {
+                video: {
+                    facingMode: 'user',
+                    width: { ideal: 640, max: 1280 },
+                    height: { ideal: 480, max: 720 },
+                    frameRate: { ideal: 20, max: 24 }
+                },
+                audio: true
+            },
+            {
+                video: { facingMode: 'user' },
+                audio: true
+            },
+            {
+                video: true,
+                audio: true
+            },
+            {
+                video: true,
+                audio: false
+            }
+        ];
+
+        let lastError = null;
+        for (const constraints of mediaProfiles) {
+            try {
+                localStream = await navigator.mediaDevices.getUserMedia(constraints);
+                break;
+            } catch (err) {
+                lastError = err;
+                console.warn('Media profile failed:', constraints, err);
+            }
+        }
+
+        if (!localStream) {
+            throw lastError || new Error('Could not access camera stream.');
+        }
+
         localVideo.srcObject = localStream;
         if (previewVideo) previewVideo.srcObject = localStream;
         setParticipantVideoState('local', localStream.getVideoTracks()[0].enabled, 'You');
@@ -535,6 +651,8 @@ function setupEventListeners() {
     // Preview Buttons
     if (btnPreviewAudio) btnPreviewAudio.addEventListener('click', toggleAudio);
     if (btnPreviewVideo) btnPreviewVideo.addEventListener('click', toggleVideo);
+    document.addEventListener('click', unlockRemoteAudioPlayback, { passive: true, once: true });
+    document.addEventListener('touchstart', unlockRemoteAudioPlayback, { passive: true, once: true });
     
     if (btnClosePermission) {
         btnClosePermission.addEventListener('click', () => {
@@ -1032,10 +1150,11 @@ function addVideoStream(id, stream, name) {
         const video = container.querySelector('video');
         if (video.srcObject !== stream) {
             video.srcObject = stream;
-            video.play().catch(e => console.error("Play failed after updating stream:", e));
+            syncRemoteVideoPlayback(video, container);
         }
         if (currentSharer === id && focusVideo.srcObject !== stream) {
             focusVideo.srcObject = stream;
+            focusVideo.play().catch(e => console.error("Focus video play failed after updating stream:", e));
         }
         return;
     }
@@ -1048,22 +1167,10 @@ function addVideoStream(id, stream, name) {
     video.srcObject = stream;
     video.autoplay = true;
     video.playsInline = true;
-    video.muted = false; // Explicitly ensure remote video is not muted
     
     // Explicitly play video to prevent mobile browsers from freezing the first frame or blocking audio
     video.onloadedmetadata = () => {
-        video.play().catch(e => {
-            console.error("Auto-play prevented by browser:", e);
-            // Autoplay policy blocked the video/audio. Show a button to let the user manually play it.
-            const playBtn = document.createElement('button');
-            playBtn.innerHTML = '<i class="fa-solid fa-volume-high"></i> Tap to Hear';
-            playBtn.className = "absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-brand-600 hover:bg-brand-500 text-white px-4 py-2 rounded-full shadow-lg z-50 text-sm font-bold flex items-center gap-2";
-            playBtn.onclick = () => {
-                video.play();
-                playBtn.remove();
-            };
-            container.appendChild(playBtn);
-        });
+        syncRemoteVideoPlayback(video, container);
     };
 
     const label = document.createElement('div');
@@ -1160,6 +1267,10 @@ function removeUser(id) {
 function toggleAudio() {
     if(!localStream) return;
     const audioTrack = localStream.getAudioTracks()[0];
+    if (!audioTrack) {
+        alert('Microphone is not available on this device/browser right now.');
+        return;
+    }
     if (audioTrack.enabled) {
         audioTrack.enabled = false;
         btnToggleAudio.innerHTML = '<i class="fa-solid fa-microphone-slash"></i>';
@@ -1337,13 +1448,20 @@ function stopScreenShare() {
 
 function handleScreenShareStart(peerId, sharerRole = 'participant') {
     const peerData = peersData.get(peerId);
-    if (!peerData || !peerData.stream) return;
-    
     currentSharer = peerId;
-    currentSharerRole = sharerRole || peerData.role || 'participant';
-    focusVideo.srcObject = peerData.stream;
-    focusName.innerText = peerData.name + " (Screen)";
-    setPresentationLayout(true, peerData.name, false, currentSharerRole);
+    currentSharerRole = sharerRole || peerData?.role || 'participant';
+    const sharerName = peerData?.name || 'Presenter';
+
+    setPresentationLayout(true, sharerName, false, currentSharerRole);
+
+    if (focusName) {
+        focusName.innerText = `${sharerName} (Screen)`;
+    }
+
+    if (peerData?.stream) {
+        focusVideo.srcObject = peerData.stream;
+        focusVideo.play().catch(err => console.error('Focus video play failed:', err));
+    }
 }
 
 function handleScreenShareStop(peerId) {
