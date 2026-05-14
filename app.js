@@ -72,6 +72,7 @@ let localStream = null;
 let adminPeerId = null;
 let myName = "";
 let isHandRaised = false;
+let isLocalVideoEnabled = true;
 
 // Full Mesh state
 // peerId -> { name, connection, call, stream }
@@ -91,6 +92,11 @@ let audioDestination;
 
 // === Initialization ===
 function init() {
+    const localContainer = document.getElementById('video-container-local');
+    if (localContainer) {
+        ensureParticipantDecorations(localContainer, 'You');
+    }
+
     setMeetingRoleUI();
     setPresentationLayout(false);
     setRecordingUI(false);
@@ -199,6 +205,80 @@ function setRecordingUI(active) {
     setRecordButtonState(active);
 }
 
+function getInitials(name) {
+    const source = (name || 'User').trim();
+    if (!source) return 'U';
+
+    const parts = source.split(/\s+/).slice(0, 2);
+    return parts.map(part => part[0]).join('').toUpperCase();
+}
+
+function ensureParticipantDecorations(container, name) {
+    let avatar = container.querySelector('.avatar-placeholder');
+    if (!avatar) {
+        avatar = document.createElement('div');
+        avatar.className = 'avatar-placeholder hidden';
+        avatar.innerHTML = `<div class="avatar-badge">${getInitials(name)}</div>`;
+        container.appendChild(avatar);
+    } else {
+        const badge = avatar.querySelector('.avatar-badge');
+        if (badge) badge.textContent = getInitials(name);
+    }
+
+    let cameraBadge = container.querySelector('.camera-state-badge');
+    if (!cameraBadge) {
+        cameraBadge = document.createElement('div');
+        cameraBadge.className = 'camera-state-badge hidden';
+        cameraBadge.innerHTML = '<i class="fa-solid fa-video-slash text-xs"></i>';
+        container.appendChild(cameraBadge);
+    }
+}
+
+function setParticipantVideoState(id, enabled, fallbackName = 'User') {
+    const container = document.getElementById(`video-container-${id}`);
+    const participantName = id === 'local' ? 'You' : (peersData.get(id)?.name || fallbackName);
+
+    if (id === 'local') {
+        isLocalVideoEnabled = enabled;
+    } else {
+        const participant = peersData.get(id);
+        if (participant) participant.isVideoEnabled = enabled;
+    }
+
+    if (!container) return;
+
+    ensureParticipantDecorations(container, participantName);
+    container.classList.toggle('video-off-mode', !enabled);
+
+    const video = container.querySelector('video');
+    if (video) {
+        video.style.opacity = enabled ? '1' : '0';
+    }
+
+    const avatar = container.querySelector('.avatar-placeholder');
+    if (avatar) {
+        avatar.classList.toggle('hidden', enabled);
+    }
+
+    const cameraBadge = container.querySelector('.camera-state-badge');
+    if (cameraBadge) {
+        cameraBadge.classList.toggle('hidden', enabled);
+    }
+}
+
+function sendCurrentMediaState(conn) {
+    if (!conn || !conn.open) return;
+    conn.send({ type: 'video-toggle', enabled: isLocalVideoEnabled });
+}
+
+function broadcastLocalVideoState() {
+    peersData.forEach(p => {
+        if (p.connection && p.connection.open) {
+            p.connection.send({ type: 'video-toggle', enabled: isLocalVideoEnabled });
+        }
+    });
+}
+
 function updateVideoGridLayout() {
     if (!videoAreaGrid) return;
 
@@ -287,6 +367,7 @@ async function startLocalVideo() {
         localStream = await navigator.mediaDevices.getUserMedia(constraints);
         localVideo.srcObject = localStream;
         if (previewVideo) previewVideo.srcObject = localStream;
+        setParticipantVideoState('local', localStream.getVideoTracks()[0].enabled, 'You');
         return true;
     } catch (err) {
         console.error("Error accessing media devices.", err);
@@ -483,7 +564,11 @@ async function initializePeer() {
         
         if (isAdmin && !peersData.has(conn.peer)) {
             // New join request
-            pendingRequests.set(conn.peer, {name: remoteName, conn});
+            pendingRequests.set(conn.peer, {
+                name: remoteName,
+                conn,
+                isVideoEnabled: conn.currentVideoEnabled !== false
+            });
             updateRequestsUI();
             
             // If they close the tab while waiting
@@ -532,10 +617,17 @@ async function initializePeer() {
 }
 
 function setupConnectionListeners(conn) {
+    conn.on('open', () => sendCurrentMediaState(conn));
+    if (conn.open) sendCurrentMediaState(conn);
+
     conn.on('data', data => {
         if (data.type === 'request-join' && isAdmin) {
             if (!peersData.has(conn.peer)) {
-                pendingRequests.set(conn.peer, {name: data.name, conn});
+                pendingRequests.set(conn.peer, {
+                    name: data.name,
+                    conn,
+                    isVideoEnabled: conn.currentVideoEnabled !== false
+                });
                 updateRequestsUI();
             }
         } else if (data.type === 'approved' && !isAdmin) {
@@ -550,6 +642,15 @@ function setupConnectionListeners(conn) {
             handleScreenShareStart(conn.peer);
         } else if (data.type === 'screen-share-stop') {
             handleScreenShareStop(conn.peer);
+        } else if (data.type === 'video-toggle') {
+            conn.currentVideoEnabled = data.enabled;
+            const participant = peersData.get(conn.peer);
+            if (participant) {
+                participant.isVideoEnabled = data.enabled;
+            } else if (pendingRequests.has(conn.peer)) {
+                pendingRequests.get(conn.peer).isVideoEnabled = data.enabled;
+            }
+            setParticipantVideoState(conn.peer, data.enabled, participant?.name || 'User');
         } else if (data.type === 'force-toggle-mute') {
             toggleAudio();
         } else if (data.type === 'kick') {
@@ -655,7 +756,11 @@ window.approveUser = function(peerId) {
     
     // Attach connection listeners now that they are approved
     setupConnectionListeners(req.conn);
-    peersData.set(peerId, {name: req.name, connection: req.conn});
+    peersData.set(peerId, {
+        name: req.name,
+        connection: req.conn,
+        isVideoEnabled: req.isVideoEnabled !== false
+    });
     
     // Broadcast new user to existing peers
     peersData.forEach((d, id) => {
@@ -802,7 +907,14 @@ function addVideoStream(id, stream, name) {
 
     container.appendChild(video);
     container.appendChild(label);
+    ensureParticipantDecorations(container, name);
     videoAreaGrid.appendChild(container);
+
+    const isVideoEnabled = id === 'local'
+        ? isLocalVideoEnabled
+        : peersData.get(id)?.isVideoEnabled !== false;
+    setParticipantVideoState(id, isVideoEnabled, name);
+
     updateActiveCount();
 }
 
@@ -904,10 +1016,11 @@ function toggleVideo() {
     const videoTrack = localStream.getVideoTracks()[0];
     if (videoTrack.enabled) {
         videoTrack.enabled = false;
+        isLocalVideoEnabled = false;
         btnToggleVideo.innerHTML = '<i class="fa-solid fa-video-slash"></i>';
         btnToggleVideo.classList.remove('bg-slate-800');
         btnToggleVideo.classList.add('bg-red-600');
-        localVideo.style.opacity = '0.3';
+        setParticipantVideoState('local', false, 'You');
         if (btnPreviewVideo) {
             btnPreviewVideo.innerHTML = '<i class="fa-solid fa-video-slash"></i>';
             btnPreviewVideo.classList.remove('bg-slate-800');
@@ -916,10 +1029,11 @@ function toggleVideo() {
         }
     } else {
         videoTrack.enabled = true;
+        isLocalVideoEnabled = true;
         btnToggleVideo.innerHTML = '<i class="fa-solid fa-video"></i>';
         btnToggleVideo.classList.remove('bg-red-600');
         btnToggleVideo.classList.add('bg-slate-800');
-        localVideo.style.opacity = '1';
+        setParticipantVideoState('local', true, 'You');
         if (btnPreviewVideo) {
             btnPreviewVideo.innerHTML = '<i class="fa-solid fa-video"></i>';
             btnPreviewVideo.classList.remove('bg-red-600');
@@ -927,6 +1041,8 @@ function toggleVideo() {
             previewVideo.style.opacity = '1';
         }
     }
+
+    broadcastLocalVideoState();
 }
 
 function toggleRaiseHand() {
