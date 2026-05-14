@@ -142,9 +142,16 @@ function init() {
         document.body.classList.remove('invite-entry-mode');
     }
     setupEventListeners();
+    if (focusVideo) {
+        focusVideo.addEventListener('loadedmetadata', updateStageViewportSizing);
+        focusVideo.addEventListener('resize', updateStageViewportSizing);
+    }
+    document.addEventListener('fullscreenchange', updateStageViewportSizing);
+    document.addEventListener('webkitfullscreenchange', updateStageViewportSizing);
     window.addEventListener('resize', () => {
         syncSidebarForViewport();
         syncPresentationViewportMode(Boolean(currentSharer), currentSharerRole);
+        updateStageViewportSizing();
     });
 }
 
@@ -206,6 +213,57 @@ function getLocalRoleKey() {
 
 function isHostLikeRole(role) {
     return role === 'host' || role === 'cohost';
+}
+
+function resetStageViewportSizing() {
+    if (!focusContainer) return;
+
+    focusContainer.style.width = '';
+    focusContainer.style.height = '';
+    focusContainer.style.aspectRatio = '';
+    focusContainer.style.maxWidth = '';
+    focusContainer.style.maxHeight = '';
+}
+
+function updateStageViewportSizing() {
+    if (!focusPanel || !focusContainer || !focusVideo) return;
+
+    if (!currentSharer) {
+        resetStageViewportSizing();
+        return;
+    }
+
+    const mediaWidth = focusVideo.videoWidth;
+    const mediaHeight = focusVideo.videoHeight;
+    if (!mediaWidth || !mediaHeight) {
+        resetStageViewportSizing();
+        return;
+    }
+
+    const panelStyles = window.getComputedStyle(focusPanel);
+    const availableWidth = focusPanel.clientWidth
+        - parseFloat(panelStyles.paddingLeft || '0')
+        - parseFloat(panelStyles.paddingRight || '0');
+    const availableHeight = focusPanel.clientHeight
+        - parseFloat(panelStyles.paddingTop || '0')
+        - parseFloat(panelStyles.paddingBottom || '0');
+
+    if (availableWidth <= 0 || availableHeight <= 0) return;
+
+    const mediaAspectRatio = mediaWidth / mediaHeight;
+    let targetWidth = availableWidth;
+    let targetHeight = targetWidth / mediaAspectRatio;
+
+    if (targetHeight > availableHeight) {
+        targetHeight = availableHeight;
+        targetWidth = targetHeight * mediaAspectRatio;
+    }
+
+    focusContainer.style.width = `${Math.round(targetWidth)}px`;
+    focusContainer.style.height = `${Math.round(targetHeight)}px`;
+    focusContainer.style.aspectRatio = `${mediaWidth} / ${mediaHeight}`;
+    focusContainer.style.maxWidth = '100%';
+    focusContainer.style.maxHeight = '100%';
 }
 
 async function tryLockLandscapePresentation() {
@@ -284,6 +342,7 @@ function applyManualStageFullscreenState(active) {
     }
 
     syncStageFullscreenButtons(Boolean(currentSharer));
+    requestAnimationFrame(updateStageViewportSizing);
 }
 
 async function enterManualStageFullscreen() {
@@ -771,6 +830,7 @@ function setPresentationLayout(active, sharerName = '', isLocalSharer = false, s
         }
         syncPresentationViewportMode(true, currentSharerRole);
         updateVideoGridLayout();
+        requestAnimationFrame(updateStageViewportSizing);
         return;
     }
 
@@ -784,6 +844,7 @@ function setPresentationLayout(active, sharerName = '', isLocalSharer = false, s
     if (focusVideo) {
         focusVideo.srcObject = null;
     }
+    resetStageViewportSizing();
     if (focusName) {
         focusName.innerText = 'Presentation Stage';
     }
@@ -1741,6 +1802,7 @@ function handleScreenShareStart(peerId, sharerRole = 'participant') {
     if (peerData?.stream) {
         focusVideo.srcObject = peerData.stream;
         focusVideo.play().catch(err => console.error('Focus video play failed:', err));
+        requestAnimationFrame(updateStageViewportSizing);
     }
 }
 
