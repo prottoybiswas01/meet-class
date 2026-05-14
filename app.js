@@ -45,10 +45,12 @@ const recordingIndicator = document.getElementById('recording-indicator');
 
 // Meeting Controls
 const videoAreaGrid = document.getElementById('video-grid');
+const focusPanel = document.getElementById('focus-panel');
 const focusContainer = document.getElementById('focus-container');
 const focusVideo = document.getElementById('focus-video');
 const focusName = document.getElementById('focus-name');
 const focusPlaceholder = document.getElementById('focus-placeholder');
+const participantsPanel = document.getElementById('participants-panel');
 const localVideo = document.getElementById('local-video');
 const btnToggleAudio = document.getElementById('btn-toggle-audio');
 const btnToggleVideo = document.getElementById('btn-toggle-video');
@@ -120,18 +122,18 @@ function setMeetingRoleUI() {
 
     if (isAdmin) {
         meetingRoleBadge.innerHTML = '<i class="fa-solid fa-crown text-brand-400"></i> Host';
-        meetingFlowCopy.textContent = 'This laptop is the host device. Admit users, watch presentations, and save recordings here.';
+        meetingFlowCopy.textContent = 'Recording saves on this device.';
         return;
     }
 
     if (isCoHost) {
         meetingRoleBadge.innerHTML = '<i class="fa-solid fa-star text-brand-400"></i> Co-host';
-        meetingFlowCopy.textContent = 'You can help manage the room. Recording still saves on the main host laptop.';
+        meetingFlowCopy.textContent = 'Host controls recording from the main device.';
         return;
     }
 
     meetingRoleBadge.innerHTML = '<i class="fa-solid fa-user-group text-brand-400"></i> Participant';
-    meetingFlowCopy.textContent = 'Presenters share from their own device. Host recording stays on the host laptop.';
+    meetingFlowCopy.textContent = 'Join and present from your own device.';
 }
 
 function setRecordButtonState(active) {
@@ -170,17 +172,38 @@ function setRecordingUI(active) {
     setRecordButtonState(active);
 }
 
+function updateVideoGridLayout() {
+    if (!videoAreaGrid) return;
+
+    const count = videoAreaGrid.querySelectorAll('.video-container').length;
+    const isPresenting = Boolean(currentSharer);
+
+    videoAreaGrid.classList.remove('single-user', 'multi-user', 'share-mode');
+    if (participantsPanel) {
+        participantsPanel.classList.toggle('presenting-layout', isPresenting);
+    }
+
+    if (isPresenting) {
+        videoAreaGrid.classList.add('share-mode');
+        if (gridCopy) {
+            gridCopy.textContent = 'Presenter on stage. Cameras stay fixed below.';
+        }
+        return;
+    }
+
+    videoAreaGrid.classList.add(count <= 1 ? 'single-user' : 'multi-user');
+    if (gridCopy) {
+        gridCopy.textContent = count <= 1 ? 'Fixed camera view.' : 'Grid view.';
+    }
+}
+
 function setPresentationLayout(active, sharerName = '', isLocalSharer = false) {
     if (focusPlaceholder) {
         focusPlaceholder.classList.toggle('hidden', active);
     }
 
-    if (focusContainer) {
-        focusContainer.classList.toggle('hidden', !active);
-    }
-
-    if (videoAreaGrid) {
-        videoAreaGrid.classList.toggle('share-mode', active);
+    if (focusPanel) {
+        focusPanel.classList.toggle('hidden', !active);
     }
 
     if (active) {
@@ -196,9 +219,7 @@ function setPresentationLayout(active, sharerName = '', isLocalSharer = false) {
         if (presenterChip) {
             presenterChip.innerHTML = `<i class="fa-solid fa-display text-brand-400"></i> ${stageLabel}`;
         }
-        if (gridCopy) {
-            gridCopy.textContent = 'Filmstrip mode is active while the presentation stays on stage.';
-        }
+        updateVideoGridLayout();
         return;
     }
 
@@ -217,9 +238,7 @@ function setPresentationLayout(active, sharerName = '', isLocalSharer = false) {
     if (presenterChip) {
         presenterChip.innerHTML = '<i class="fa-solid fa-display text-brand-400"></i> No one is presenting';
     }
-    if (gridCopy) {
-        gridCopy.textContent = 'Grid view in normal mode. Filmstrip view while someone presents.';
-    }
+    updateVideoGridLayout();
 }
 
 async function startLocalVideo() {
@@ -645,12 +664,14 @@ window.kickUser = function(peerId) {
 function updateActiveCount() {
     const activeUsersBadge = document.getElementById('active-users-badge');
     const activeCountEl = document.getElementById('active-count');
+    const count = document.querySelectorAll('#video-grid .video-container').length;
+
     if (activeUsersBadge && activeCountEl) {
         activeUsersBadge.classList.remove('hidden');
-        // Count all video containers in the grid
-        const count = document.querySelectorAll('#video-grid .video-container').length;
         activeCountEl.innerText = count;
     }
+
+    updateVideoGridLayout();
 }
 
 // === User Approved Flow ===

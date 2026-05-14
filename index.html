@@ -91,15 +91,49 @@
 
         .video-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
             gap: 0.9rem;
-            align-content: start;
+            min-height: 0;
+            height: 100%;
+        }
+
+        .video-grid.multi-user {
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            grid-auto-rows: minmax(0, 1fr);
+            align-content: stretch;
+        }
+
+        .video-grid.single-user {
+            display: flex !important;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .video-grid.single-user .video-container {
+            width: min(100%, 1080px);
+            height: min(100%, 70vh);
+            aspect-ratio: 16 / 9;
+        }
+
+        .video-grid.multi-user .video-container {
+            height: 100%;
+            min-height: 11rem;
+            aspect-ratio: auto;
         }
 
         @media (max-width: 768px) {
-            .video-grid {
+            .video-grid.multi-user {
                 grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
                 gap: 0.75rem;
+            }
+
+            .video-grid.single-user .video-container {
+                width: 100%;
+                height: auto;
+                aspect-ratio: 4 / 3;
+            }
+
+            .video-grid.multi-user .video-container {
+                min-height: 8rem;
             }
         }
 
@@ -110,11 +144,13 @@
             overflow-y: hidden;
             padding-bottom: 0.2rem;
             align-items: stretch;
-            min-height: 7.75rem;
+            min-height: 0;
+            height: 100%;
         }
 
         .video-grid.share-mode .video-container {
             width: 13.5rem;
+            min-height: 100%;
             flex-shrink: 0;
         }
 
@@ -181,6 +217,16 @@
                 linear-gradient(180deg, rgba(3, 7, 18, 0.96), rgba(2, 6, 23, 1));
         }
 
+        #participants-panel.presenting-layout {
+            flex: 0 0 11rem;
+        }
+
+        @media (max-width: 768px) {
+            #participants-panel.presenting-layout {
+                flex-basis: 8.5rem;
+            }
+        }
+
         .hero-grid {
             display: grid;
             gap: 1.5rem;
@@ -195,7 +241,7 @@
         .sidebar-open { transform: translateX(0) !important; }
     </style>
 </head>
-<body class="h-screen w-screen flex flex-col text-slate-100 overflow-x-hidden">
+<body class="h-screen w-screen flex flex-col text-slate-100 overflow-hidden">
 
     <div id="landing-screen" class="flex-1 overflow-auto px-4 py-5 md:px-8 md:py-8">
         <div class="mx-auto min-h-full max-w-7xl">
@@ -350,7 +396,7 @@
                             <h1 class="truncate text-lg font-bold text-white md:text-xl">Meet Class</h1>
                             <span id="meeting-role-badge" class="status-chip"><i class="fa-solid fa-user-group text-brand-400"></i> Participant</span>
                         </div>
-                        <p id="meeting-flow-copy" class="mt-1 text-xs text-slate-400 md:text-sm">Presenters share from their own device. Host recording stays on the host laptop.</p>
+                        <p id="meeting-flow-copy" class="mt-1 text-xs text-slate-400 md:text-sm">Recording saves on this device.</p>
                     </div>
                 </div>
 
@@ -377,33 +423,21 @@
         </header>
 
         <main class="flex-1 flex overflow-hidden relative min-h-0">
-            <div id="video-area" class="flex-1 min-h-0 p-3 md:p-5 flex flex-col gap-4 overflow-y-auto overflow-x-hidden">
-                <section class="panel flex min-h-0 flex-1 flex-col rounded-[1.75rem] p-3 md:p-4">
-                    <div id="focus-placeholder" class="flex flex-1 items-center justify-center rounded-[1.5rem] border border-dashed border-slate-700/80 bg-slate-950/60 px-6 py-10 text-center">
-                        <div class="max-w-xl">
-                            <div class="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-brand-500/10 text-brand-400">
-                                <i class="fa-solid fa-display text-2xl"></i>
-                            </div>
-                            <h3 class="mt-5 text-2xl font-bold text-white">No one is presenting yet</h3>
-                            <p class="mt-3 text-sm leading-7 text-slate-400 md:text-base">
-                                Once a participant or host shares a screen, the presentation takes this stage and the people view shifts into a filmstrip, similar to Google Meet.
-                            </p>
-                        </div>
-                    </div>
-
-                    <div id="focus-container" class="hidden flex-1 min-h-0 overflow-hidden rounded-[1.5rem] border border-slate-700/70 bg-black relative shadow-2xl">
+            <div id="video-area" class="flex-1 min-h-0 p-3 md:p-5 flex flex-col gap-4 overflow-hidden">
+                <section id="focus-panel" class="panel hidden min-h-0 flex-1 flex-col rounded-[1.75rem] p-3 md:p-4">
+                    <div id="focus-container" class="flex flex-1 min-h-0 overflow-hidden rounded-[1.5rem] border border-slate-700/70 bg-black relative shadow-2xl">
                         <video id="focus-video" autoplay playsinline class="h-full w-full"></video>
                         <div id="focus-name" class="name-label">Presentation Stage</div>
                     </div>
                 </section>
 
-                <section class="panel rounded-[1.75rem] p-3 md:p-4">
+                <section id="participants-panel" class="panel flex min-h-0 flex-1 flex-col rounded-[1.75rem] p-3 md:p-4">
                     <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
                         <div>
                             <p class="eyebrow">People</p>
                             <h3 class="mt-1 text-lg font-bold text-white">Participants and cameras</h3>
                         </div>
-                        <p id="grid-copy" class="text-xs text-slate-400 md:text-sm">Grid view in normal mode. Filmstrip view while someone presents.</p>
+                        <p id="grid-copy" class="text-xs text-slate-400 md:text-sm">Fixed camera view.</p>
                     </div>
 
                     <div id="video-grid" class="video-grid">
@@ -413,13 +447,6 @@
                         </div>
                     </div>
                 </section>
-
-                <div class="hidden" aria-hidden="true">
-                    <span id="stage-title">Ready for the room</span>
-                    <span id="stage-copy">When someone clicks present, that person's browser should ask for screen-share approval. Everyone else should only receive the shared view.</span>
-                    <span id="presenter-chip">No one is presenting</span>
-                    <span id="recording-chip">Recording idle</span>
-                </div>
             </div>
 
             <div id="admin-sidebar" class="hidden flex absolute right-0 top-0 h-full w-full max-w-[340px] flex-col border-l border-slate-800 bg-slate-950/95 backdrop-blur-xl z-40 transform translate-x-full md:static md:translate-x-0 shadow-[-10px_0_25px_rgba(2,6,23,0.45)]">
