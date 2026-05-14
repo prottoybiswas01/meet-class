@@ -154,13 +154,24 @@
             flex-shrink: 0;
         }
 
+        .focus-panel.presenting-layout {
+            flex: 1 1 auto;
+            justify-content: center;
+        }
+
+        .focus-panel.presenting-layout #focus-container {
+            width: 100%;
+            height: 100%;
+        }
+
         @media (max-width: 768px) {
             .video-grid.share-mode {
-                min-height: 5.8rem;
+                min-height: 5rem;
             }
 
             .video-grid.share-mode .video-container {
-                width: 9.75rem;
+                width: 7.75rem;
+                min-height: 100%;
             }
         }
 
@@ -218,12 +229,32 @@
         }
 
         #participants-panel.presenting-layout {
-            flex: 0 0 11rem;
+            flex: 0 0 8.75rem;
         }
 
         @media (max-width: 768px) {
             #participants-panel.presenting-layout {
-                flex-basis: 8.5rem;
+                flex-basis: 7.25rem;
+            }
+
+            #participants-panel.presenting-layout .participants-header {
+                margin-bottom: 0.45rem;
+            }
+
+            #participants-panel.presenting-layout .participants-header h3,
+            #participants-panel.presenting-layout #grid-copy {
+                display: none;
+            }
+
+            .focus-panel.presenting-layout {
+                flex: 0 0 auto;
+            }
+
+            .focus-panel.presenting-layout #focus-container {
+                aspect-ratio: 16 / 9;
+                height: auto;
+                max-height: 58vh;
+                min-height: min(56vw, 15rem);
             }
         }
 
@@ -402,11 +433,11 @@
 
                 <div class="flex flex-wrap items-center justify-end gap-2 md:gap-3">
                     <span id="active-users-badge" class="status-chip hidden"><i class="fa-solid fa-users text-brand-400"></i> <span id="active-count">1</span> in room</span>
-                    <div id="recording-indicator" class="hidden flex items-center gap-2 rounded-full border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-300 md:text-sm">
+                    <div id="recording-indicator" class="hidden items-center gap-2 rounded-full border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-300 md:text-sm">
                         <div class="h-2.5 w-2.5 rounded-full bg-red-500 animate-pulse"></div>
                         <span>Recording on host laptop</span>
                     </div>
-                    <div id="admin-controls-header" class="hidden flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900/80 px-3 py-2">
+                    <div id="admin-controls-header" class="hidden items-center gap-2 rounded-full border border-slate-700 bg-slate-900/80 px-3 py-2">
                         <span class="hidden text-xs font-medium text-slate-400 lg:inline">Invite link</span>
                         <input type="text" id="invite-link" readonly class="hidden w-64 rounded-full border border-slate-700 bg-slate-950/70 px-3 py-1.5 text-sm text-slate-300 outline-none md:block">
                         <button id="btn-copy-link" class="inline-flex items-center gap-2 rounded-full bg-slate-800 px-3 py-1.5 text-sm font-semibold text-brand-400 transition hover:bg-slate-700 hover:text-white">
@@ -416,7 +447,7 @@
                     </div>
                     <button id="btn-toggle-sidebar" class="hidden rounded-full border border-slate-700 bg-slate-900/75 p-3 text-slate-300 transition hover:border-brand-400 hover:text-white md:hidden relative">
                         <i class="fa-solid fa-users"></i>
-                        <span id="mobile-request-badge" class="absolute -right-1 -top-1 hidden flex h-5 w-5 items-center justify-center rounded-full bg-brand-500 text-[10px] font-bold text-white">0</span>
+                        <span id="mobile-request-badge" class="absolute -right-1 -top-1 hidden h-5 w-5 items-center justify-center rounded-full bg-brand-500 text-[10px] font-bold text-white">0</span>
                     </button>
                 </div>
             </div>
@@ -424,7 +455,7 @@
 
         <main class="flex-1 flex overflow-hidden relative min-h-0">
             <div id="video-area" class="flex-1 min-h-0 p-3 md:p-5 flex flex-col gap-4 overflow-hidden">
-                <section id="focus-panel" class="panel hidden min-h-0 flex-1 flex-col rounded-[1.75rem] p-3 md:p-4">
+                <section id="focus-panel" class="focus-panel panel hidden min-h-0 flex-1 flex-col rounded-[1.75rem] p-3 md:p-4">
                     <div id="focus-container" class="flex flex-1 min-h-0 overflow-hidden rounded-[1.5rem] border border-slate-700/70 bg-black relative shadow-2xl">
                         <video id="focus-video" autoplay playsinline class="h-full w-full"></video>
                         <div id="focus-name" class="name-label">Presentation Stage</div>
@@ -432,7 +463,7 @@
                 </section>
 
                 <section id="participants-panel" class="panel flex min-h-0 flex-1 flex-col rounded-[1.75rem] p-3 md:p-4">
-                    <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <div class="participants-header mb-3 flex flex-wrap items-center justify-between gap-2">
                         <div>
                             <p class="eyebrow">People</p>
                             <h3 class="mt-1 text-lg font-bold text-white">Participants and cameras</h3>
@@ -449,7 +480,7 @@
                 </section>
             </div>
 
-            <div id="admin-sidebar" class="hidden flex absolute right-0 top-0 h-full w-full max-w-[340px] flex-col border-l border-slate-800 bg-slate-950/95 backdrop-blur-xl z-40 transform translate-x-full md:static md:translate-x-0 shadow-[-10px_0_25px_rgba(2,6,23,0.45)]">
+            <div id="admin-sidebar" class="hidden absolute right-0 top-0 h-full w-full max-w-[340px] flex-col border-l border-slate-800 bg-slate-950/95 backdrop-blur-xl z-40 transform translate-x-full md:static md:flex md:translate-x-0 shadow-[-10px_0_25px_rgba(2,6,23,0.45)]">
                 <div class="flex items-center justify-between border-b border-slate-800 px-5 py-4">
                     <div>
                         <p class="eyebrow">Host Queue</p>
@@ -484,7 +515,7 @@
                 <button id="btn-raise-hand" class="flex h-12 w-12 items-center justify-center rounded-full bg-slate-800 text-slate-300 transition hover:bg-amber-500 hover:text-white focus:outline-none" title="Raise Hand">
                     <i class="fa-solid fa-hand"></i>
                 </button>
-                <button id="btn-record" class="hidden flex h-12 w-12 items-center justify-center rounded-full bg-slate-800 text-slate-300 transition hover:bg-red-600 hover:text-white focus:outline-none" title="Record Meeting">
+                <button id="btn-record" class="hidden h-12 w-12 items-center justify-center rounded-full bg-slate-800 text-slate-300 transition hover:bg-red-600 hover:text-white focus:outline-none" title="Record Meeting">
                     <i class="fa-solid fa-record-vinyl"></i>
                 </button>
                 <button id="btn-leave" class="flex h-12 w-12 items-center justify-center rounded-full bg-red-600 text-white transition hover:bg-red-700 focus:outline-none" title="Leave Meeting">

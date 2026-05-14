@@ -108,12 +108,38 @@ function init() {
         }
     }
     setupEventListeners();
+    window.addEventListener('resize', syncSidebarForViewport);
 }
 
 function showScreen(screenName) {
     Object.values(screens).forEach(s => s.classList.add('hidden-section'));
     if (screens[screenName]) {
         screens[screenName].classList.remove('hidden-section');
+    }
+}
+
+function isDesktopViewport() {
+    return window.innerWidth >= 768;
+}
+
+function syncSidebarForViewport() {
+    if (!adminSidebar) return;
+
+    if (isAdmin && isDesktopViewport()) {
+        adminSidebar.classList.remove('hidden', 'translate-x-full');
+        adminSidebar.classList.add('flex');
+        if (sidebarBackdrop) {
+            sidebarBackdrop.classList.add('hidden', 'opacity-0', 'pointer-events-none');
+            sidebarBackdrop.classList.remove('opacity-100', 'pointer-events-auto');
+        }
+        return;
+    }
+
+    adminSidebar.classList.add('hidden', 'translate-x-full');
+    adminSidebar.classList.remove('flex');
+    if (sidebarBackdrop) {
+        sidebarBackdrop.classList.add('hidden', 'opacity-0', 'pointer-events-none');
+        sidebarBackdrop.classList.remove('opacity-100', 'pointer-events-auto');
     }
 }
 
@@ -161,6 +187,7 @@ function setScreenShareButtonState(active) {
 function setRecordingUI(active) {
     if (recordingIndicator) {
         recordingIndicator.classList.toggle('hidden', !active);
+        recordingIndicator.classList.toggle('flex', active);
     }
 
     if (recordingChip) {
@@ -181,6 +208,9 @@ function updateVideoGridLayout() {
     videoAreaGrid.classList.remove('single-user', 'multi-user', 'share-mode');
     if (participantsPanel) {
         participantsPanel.classList.toggle('presenting-layout', isPresenting);
+    }
+    if (focusPanel) {
+        focusPanel.classList.toggle('presenting-layout', isPresenting);
     }
 
     if (isPresenting) {
@@ -320,6 +350,8 @@ function setupEventListeners() {
     // Mobile Sidebar Toggles
     if (btnToggleSidebar) {
         btnToggleSidebar.addEventListener('click', () => {
+            adminSidebar.classList.remove('hidden', 'translate-x-full');
+            adminSidebar.classList.add('flex');
             adminSidebar.classList.remove('translate-x-full');
             sidebarBackdrop.classList.remove('hidden', 'opacity-0', 'pointer-events-none');
             sidebarBackdrop.classList.add('opacity-100', 'pointer-events-auto');
@@ -334,12 +366,18 @@ function setupEventListeners() {
 }
 
 function closeMobileSidebar() {
+    if (isDesktopViewport()) return;
+
     adminSidebar.classList.add('translate-x-full');
     sidebarBackdrop.classList.remove('opacity-100', 'pointer-events-auto');
     sidebarBackdrop.classList.add('opacity-0', 'pointer-events-none');
     setTimeout(() => {
         if (sidebarBackdrop.classList.contains('opacity-0')) {
             sidebarBackdrop.classList.add('hidden');
+        }
+        if (adminSidebar.classList.contains('translate-x-full')) {
+            adminSidebar.classList.add('hidden');
+            adminSidebar.classList.remove('flex');
         }
     }, 300);
 }
@@ -360,10 +398,12 @@ async function handleAdminLogin() {
 
         showScreen('meeting');
         adminControlsHeader.classList.remove('hidden');
-        adminSidebar.classList.remove('hidden');
+        adminControlsHeader.classList.add('flex');
         if (btnToggleSidebar) btnToggleSidebar.classList.remove('hidden');
         btnRecord.classList.remove('hidden');
+        btnRecord.classList.add('flex');
         setRecordButtonState(false);
+        syncSidebarForViewport();
 
         await initializePeer();
     } else {
@@ -521,6 +561,7 @@ function setupConnectionListeners(conn) {
             isCoHost = true;
             alert("You are now a Co-Host!");
             btnRecord.classList.remove('hidden'); // Co-Hosts can also record (via main host)
+            btnRecord.classList.add('flex');
             setMeetingRoleUI();
             setRecordButtonState(isRecording);
             // Re-render admin controls for existing videos
@@ -574,10 +615,12 @@ function updateRequestsUI() {
         mobileRequestBadge.innerText = pendingRequests.size;
         if (pendingRequests.size > 0) {
             mobileRequestBadge.classList.remove('hidden');
+            mobileRequestBadge.classList.add('flex');
             if (btnToggleSidebar) btnToggleSidebar.classList.add('animate-bounce');
             setTimeout(() => { if(btnToggleSidebar) btnToggleSidebar.classList.remove('animate-bounce'); }, 3000);
         } else {
             mobileRequestBadge.classList.add('hidden');
+            mobileRequestBadge.classList.remove('flex');
         }
     }
 
