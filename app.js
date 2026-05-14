@@ -96,9 +96,20 @@ let recordingCanvasContext = null;
 let recordingSourceVideo = null;
 let recordingAnimationFrame = null;
 let recordingCanvasStream = null;
+const MIC_AUDIO_CONSTRAINTS = {
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true,
+    channelCount: 1
+};
+const RECORDING_AUDIO_BOOST = 1.9;
+const MAX_RECORDING_EDGE = 3840;
 
 let audioContext;
 let audioDestination;
+let recordingMixCompressorNode = null;
+let recordingMixGainNode = null;
+const recordingAudioSources = new Map();
 let reconnectTimer = null;
 let orientationLockRequested = false;
 let isManualStageFullscreen = false;
@@ -556,27 +567,74 @@ function unlockRemoteAudioPlayback() {
     });
 }
 
-function getFullscreenRecordingSize(videoWidth, videoHeight) {
-    const safeWidth = Math.max(2, Math.round(videoWidth || 1920));
-    const safeHeight = Math.max(2, Math.round(videoHeight || 1080));
-    const isLandscape = safeWidth >= safeHeight;
-    const targetAspect = isLandscape ? (16 / 9) : (9 / 16);
-    const sourceAspect = safeWidth / safeHeight;
+function disconnectRecordingAudioSource(key) {
+    const source = recordingAudioSources.get(key);
+    if (!source) return;
 
-    if (Math.abs(sourceAspect - targetAspect) < 0.015) {
+    try {
+        source.disconnect();
+    } catch (err) {
+        console.debug('Recording audio source disconnect skipped:', err);
+    }
+
+    recordingAudioSources.delete(key);
+}
+
+function resetRecordingAudioGraph() {
+    Array.from(recordingAudioSources.keys()).forEach(disconnectRecordingAudioSource);
+    recordingMixCompressorNode = null;
+    recordingMixGainNode = null;
+    audioDestination = null;
+}
+
+function createRecordingAudioGraph() {
+    if (!audioContext) return;
+
+    audioDestination = audioContext.createMediaStreamDestination();
+    recordingMixCompressorNode = audioContext.createDynamicsCompressor();
+    recordingMixCompressorNode.threshold.value = -24;
+    recordingMixCompressorNode.knee.value = 18;
+    recordingMixCompressorNode.ratio.value = 4;
+    recordingMixCompressorNode.attack.value = 0.003;
+    recordingMixCompressorNode.release.value = 0.2;
+
+    recordingMixGainNode = audioContext.createGain();
+    recordingMixGainNode.gain.value = RECORDING_AUDIO_BOOST;
+
+    recordingMixCompressorNode.connect(recordingMixGainNode);
+    recordingMixGainNode.connect(audioDestination);
+}
+
+function connectRecordingAudioSource(key, stream) {
+    disconnectRecordingAudioSource(key);
+
+    if (!audioContext || !recordingMixCompressorNode || !stream?.getAudioTracks?.().length) {
+        return;
+    }
+
+    const source = audioContext.createMediaStreamSource(stream);
+    source.connect(recordingMixCompressorNode);
+    recordingAudioSources.set(key, source);
+}
+
+function getSafeRecordingDimension(value, fallback) {
+    const safeValue = Math.max(2, Math.round(value || fallback));
+    return safeValue % 2 === 0 ? safeValue : safeValue + 1;
+}
+
+function getFullscreenRecordingSize(videoWidth, videoHeight) {
+    const safeWidth = getSafeRecordingDimension(videoWidth, 1920);
+    const safeHeight = getSafeRecordingDimension(videoHeight, 1080);
+    const longestEdge = Math.max(safeWidth, safeHeight);
+
+    if (longestEdge <= MAX_RECORDING_EDGE) {
         return { width: safeWidth, height: safeHeight };
     }
 
-    if (sourceAspect > targetAspect) {
-        return {
-            width: safeWidth,
-            height: Math.max(2, Math.round(safeWidth / targetAspect))
-        };
-    }
-
+    const scale = MAX_RECORDING_EDGE / longestEdge;
     return {
-        width: Math.max(2, Math.round(safeHeight * targetAspect)),
-        height: safeHeight
+        width: getSafeRecordingDimension(safeWidth * scale, 1920),
+        height: getSafeRecordingDimension(safeHeight * scale, 1080)
     };
 }
 
@@ -612,16 +670,18 @@ function renderRecordingFrame() {
         return;
     }
 
-    const canvasWidth = recordingCanvas.width;
-    const canvasHeight = recordingCanvas.height;
-    const scale = Math.max(canvasWidth / sourceWidth, canvasHeight / sourceHeight);
-    const drawWidth = sourceWidth * scale;
-    const drawHeight = sourceHeight * scale;
-    const drawX = (canvasWidth - drawWidth) / 2;
-    const drawY = (canvasHeight - drawHeight) / 2;
-
-    recordingCanvasContext.clearRect(0, 0, canvasWidth, canvasHeight);
-    recordingCanvasContext.drawImage(recordingSourceVideo, drawX, drawY, drawWidth, drawHeight);
+    recordingCanvasContext.clearRect(0, 0, recordingCanvas.width, recordingCanvas.height);
+    recordingCanvasContext.drawImage(
+        recordingSourceVideo,
+        0,
+        0,
+        sourceWidth,
+        sourceHeight,
+        0,
+        0,
+        recordingCanvas.width,
+        recordingCanvas.height
+    );
     recordingAnimationFrame = requestAnimationFrame(renderRecordingFrame);
 }
 
@@ -632,60 +692,15 @@ async function createFullscreenRecordingStream(sourceStream, mixedAudioTrack) {
     }
 
     stopRecordingRenderer();
+    const combinedStream = new MediaStream();
+    const recorderVideoTrack = sourceTrack.clone();
+    combinedStream.addTrack(recorderVideoTrack);
 
-    recordingSourceVideo = document.createElement('video');
-    recordingSourceVideo.autoplay = true;
-    recordingSourceVideo.muted = true;
-    recordingSourceVideo.defaultMuted = true;
-    recordingSourceVideo.playsInline = true;
-    recordingSourceVideo.srcObject = sourceStream;
-    recordingSourceVideo.style.position = 'fixed';
-    recordingSourceVideo.style.left = '-99999px';
-    recordingSourceVideo.style.top = '-99999px';
-    recordingSourceVideo.style.opacity = '0';
-    recordingSourceVideo.setAttribute('aria-hidden', 'true');
-    document.body.appendChild(recordingSourceVideo);
-
-    await new Promise((resolve, reject) => {
-        const handleLoaded = () => {
-            cleanup();
-            resolve();
-        };
-        const handleError = () => {
-            cleanup();
-            reject(new Error('Recording preview video could not load.'));
-        };
-        const cleanup = () => {
-            recordingSourceVideo.removeEventListener('loadedmetadata', handleLoaded);
-            recordingSourceVideo.removeEventListener('error', handleError);
-        };
-
-        recordingSourceVideo.addEventListener('loadedmetadata', handleLoaded, { once: true });
-        recordingSourceVideo.addEventListener('error', handleError, { once: true });
-    });
-
-    await recordingSourceVideo.play();
-
-    const targetSize = getFullscreenRecordingSize(
-        recordingSourceVideo.videoWidth || sourceTrack.getSettings?.().width || 1920,
-        recordingSourceVideo.videoHeight || sourceTrack.getSettings?.().height || 1080
-    );
-
-    recordingCanvas = document.createElement('canvas');
-    recordingCanvas.width = targetSize.width;
-    recordingCanvas.height = targetSize.height;
-    recordingCanvasContext = recordingCanvas.getContext('2d', { alpha: false });
-    recordingCanvasContext.imageSmoothingEnabled = true;
-    recordingCanvasContext.imageSmoothingQuality = 'high';
-
-    renderRecordingFrame();
-
-    recordingCanvasStream = recordingCanvas.captureStream(30);
     if (mixedAudioTrack) {
-        recordingCanvasStream.addTrack(mixedAudioTrack);
+        combinedStream.addTrack(mixedAudioTrack);
     }
 
-    return recordingCanvasStream;
+    return combinedStream;
 }
 
 function sendCurrentMediaState(conn) {
@@ -796,7 +811,7 @@ async function startLocalVideo() {
                     height: { ideal: 720, max: 1080 },
                     frameRate: { ideal: 24, max: 30 }
                 },
-                audio: true
+                audio: { ...MIC_AUDIO_CONSTRAINTS }
             },
             {
                 video: {
@@ -805,15 +820,15 @@ async function startLocalVideo() {
                     height: { ideal: 480, max: 720 },
                     frameRate: { ideal: 20, max: 24 }
                 },
-                audio: true
+                audio: { ...MIC_AUDIO_CONSTRAINTS }
             },
             {
                 video: { facingMode: 'user' },
-                audio: true
+                audio: { ...MIC_AUDIO_CONSTRAINTS }
             },
             {
                 video: true,
-                audio: true
+                audio: { ...MIC_AUDIO_CONSTRAINTS }
             },
             {
                 video: true,
@@ -1244,9 +1259,8 @@ function setupCallListeners(call, name) {
         addVideoStream(call.peer, stream, name);
         
         // If recording is active, plug this new stream into the mix
-        if (isRecording && audioContext && audioDestination && stream.getAudioTracks().length > 0) {
-            const remoteSource = audioContext.createMediaStreamSource(stream);
-            remoteSource.connect(audioDestination);
+        if (isRecording && audioContext && recordingMixCompressorNode) {
+            connectRecordingAudioSource(`peer:${call.peer}`, stream);
         }
     });
     call.on('close', () => removeUser(call.peer));
@@ -1515,6 +1529,8 @@ function removeUser(id) {
         currentSharerRole = null;
         setPresentationLayout(false);
     }
+
+    disconnectRecordingAudioSource(`peer:${id}`);
 
     const el = document.getElementById(`video-container-${id}`);
     if (el) el.remove();
@@ -1799,26 +1815,19 @@ async function startRecording() {
 
         // Initialize AudioContext to mix all voices
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        audioDestination = audioContext.createMediaStreamDestination();
+        createRecordingAudioGraph();
 
         // 1. Add Local Mic
-        if (localStream && localStream.getAudioTracks().length > 0) {
-            const localSource = audioContext.createMediaStreamSource(localStream);
-            localSource.connect(audioDestination);
-        }
+        connectRecordingAudioSource('local-mic', localStream);
 
         // 2. Add All Remote Peers
-        peersData.forEach(p => {
-            if (p.stream && p.stream.getAudioTracks().length > 0) {
-                const remoteSource = audioContext.createMediaStreamSource(p.stream);
-                remoteSource.connect(audioDestination);
-            }
+        peersData.forEach((p, peerId) => {
+            connectRecordingAudioSource(`peer:${peerId}`, p.stream);
         });
 
         // 3. Add Screen System Audio (if any and not reusing)
-        if (!reusedScreenShare && recordingVideoStream.getAudioTracks().length > 0) {
-            const displaySource = audioContext.createMediaStreamSource(recordingVideoStream);
-            displaySource.connect(audioDestination);
+        if (!reusedScreenShare) {
+            connectRecordingAudioSource('display-audio', recordingVideoStream);
         }
 
         const mixedAudioTrack = audioDestination.stream.getAudioTracks()[0];
@@ -1855,6 +1864,7 @@ async function startRecording() {
                 audioContext.close();
                 audioContext = null;
             }
+            resetRecordingAudioGraph();
 
             stopRecordingRenderer();
             
@@ -1882,6 +1892,7 @@ async function startRecording() {
             audioContext.close();
             audioContext = null;
         }
+        resetRecordingAudioGraph();
         if (!reusedScreenShare && recordingVideoStream) {
             recordingVideoStream.getTracks().forEach(track => track.stop());
         }
