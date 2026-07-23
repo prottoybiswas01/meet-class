@@ -1067,6 +1067,28 @@ function renderRecordingFrame() {
     recordingAnimationFrame = requestAnimationFrame(renderRecordingFrame);
 }
 
+let recordingCombinedStream = null;
+
+function updateRecordingVideoTrack(newStream) {
+    if (!isRecording || !recordingCombinedStream || !newStream) return;
+
+    const newVideoTrack = newStream.getVideoTracks?.()?.[0];
+    if (!newVideoTrack) return;
+
+    const currentVideoTracks = recordingCombinedStream.getVideoTracks();
+    currentVideoTracks.forEach(track => {
+        try {
+            recordingCombinedStream.removeTrack(track);
+        } catch (e) {
+            console.debug('Error removing old recording track:', e);
+        }
+    });
+
+    const clonedTrack = newVideoTrack.clone();
+    recordingCombinedStream.addTrack(clonedTrack);
+    console.log('Recording video track dynamically updated to match current stage presentation.');
+}
+
 async function createFullscreenRecordingStream(sourceStream, mixedAudioTrack) {
     const sourceTrack = sourceStream?.getVideoTracks?.()[0];
     if (!sourceTrack) {
@@ -1074,15 +1096,15 @@ async function createFullscreenRecordingStream(sourceStream, mixedAudioTrack) {
     }
 
     stopRecordingRenderer();
-    const combinedStream = new MediaStream();
+    recordingCombinedStream = new MediaStream();
     const recorderVideoTrack = sourceTrack.clone();
-    combinedStream.addTrack(recorderVideoTrack);
+    recordingCombinedStream.addTrack(recorderVideoTrack);
 
     if (mixedAudioTrack) {
-        combinedStream.addTrack(mixedAudioTrack);
+        recordingCombinedStream.addTrack(mixedAudioTrack);
     }
 
-    return combinedStream;
+    return recordingCombinedStream;
 }
 
 function sendCurrentMediaState(conn) {
@@ -2144,6 +2166,10 @@ async function toggleScreenShare() {
             focusName.innerText = "You (Screen)";
             setPresentationLayout(true, myName || 'You', true, currentSharerRole);
 
+            if (isRecording) {
+                updateRecordingVideoTrack(screenStream);
+            }
+
             screenTrack.onended = () => { if (isScreenSharing) stopScreenShare(); };
         } catch (err) {
             console.error("Error sharing screen:", err);
@@ -2180,6 +2206,10 @@ function stopScreenShare() {
     });
 
     setPresentationLayout(false);
+
+    if (isRecording) {
+        updateRecordingVideoTrack(localStream);
+    }
 }
 
 function handleScreenShareStart(peerId, sharerRole = 'participant') {
@@ -2198,6 +2228,10 @@ function handleScreenShareStart(peerId, sharerRole = 'participant') {
         focusVideo.srcObject = peerData.stream;
         focusVideo.play().catch(err => console.error('Focus video play failed:', err));
         requestAnimationFrame(updateStageViewportSizing);
+
+        if (isRecording) {
+            updateRecordingVideoTrack(peerData.stream);
+        }
     }
 }
 
@@ -2208,6 +2242,10 @@ function handleScreenShareStop(peerId) {
     currentSharer = null;
     currentSharerRole = null;
     setPresentationLayout(false);
+
+    if (isRecording) {
+        updateRecordingVideoTrack(localStream);
+    }
 }
 
 function leaveMeeting() {
@@ -2255,26 +2293,31 @@ let recordingVideoStream = null;
 async function startRecording() {
     try {
         if (currentSharer === 'local' && screenStream) {
-            // We are sharing our own screen, reuse it
             recordingVideoStream = screenStream;
             reusedScreenShare = true;
-        } else if (currentSharer && peersData.has(currentSharer)) {
-            // A remote user (like Co-Host) is sharing their screen! Record their stream directly!
-            // No need to ask the Main Host for getDisplayMedia.
+        } else if (currentSharer && focusVideo && focusVideo.srcObject) {
+            recordingVideoStream = focusVideo.srcObject;
+            reusedScreenShare = true;
+        } else if (currentSharer && peersData.has(currentSharer) && peersData.get(currentSharer).stream) {
             recordingVideoStream = peersData.get(currentSharer).stream;
             reusedScreenShare = true;
         } else {
-            // Request the user to select the screen to share (High Quality)
-            recordingVideoStream = await navigator.mediaDevices.getDisplayMedia({ 
-                video: { 
-                    cursor: "always",
-                    width: { ideal: 1920, max: 1920 },
-                    height: { ideal: 1080, max: 1080 },
-                    frameRate: { ideal: 30 }
-                }, 
-                audio: true 
-            });
-            reusedScreenShare = false;
+            try {
+                recordingVideoStream = await navigator.mediaDevices.getDisplayMedia({ 
+                    video: { 
+                        cursor: "always",
+                        width: { ideal: 1920, max: 1920 },
+                        height: { ideal: 1080, max: 1080 },
+                        frameRate: { ideal: 30 }
+                    }, 
+                    audio: true 
+                });
+                reusedScreenShare = false;
+            } catch (screenErr) {
+                console.warn("Display capture cancelled or unavailable, falling back to camera stream:", screenErr);
+                recordingVideoStream = localStream;
+                reusedScreenShare = true;
+            }
         }
 
         // Initialize AudioContext to mix all voices
