@@ -426,35 +426,8 @@ function updateStageViewportSizing() {
         return;
     }
 
-    const mediaWidth = focusVideo.videoWidth;
-    const mediaHeight = focusVideo.videoHeight;
-    if (!mediaWidth || !mediaHeight) {
-        resetStageViewportSizing();
-        return;
-    }
-
-    const panelStyles = window.getComputedStyle(focusPanel);
-    const availableWidth = focusPanel.clientWidth
-        - parseFloat(panelStyles.paddingLeft || '0')
-        - parseFloat(panelStyles.paddingRight || '0');
-    const availableHeight = focusPanel.clientHeight
-        - parseFloat(panelStyles.paddingTop || '0')
-        - parseFloat(panelStyles.paddingBottom || '0');
-
-    if (availableWidth <= 0 || availableHeight <= 0) return;
-
-    const mediaAspectRatio = mediaWidth / mediaHeight;
-    let targetWidth = availableWidth;
-    let targetHeight = targetWidth / mediaAspectRatio;
-
-    if (targetHeight > availableHeight) {
-        targetHeight = availableHeight;
-        targetWidth = targetHeight * mediaAspectRatio;
-    }
-
-    focusContainer.style.width = `${Math.round(targetWidth)}px`;
-    focusContainer.style.height = `${Math.round(targetHeight)}px`;
-    focusContainer.style.aspectRatio = `${mediaWidth} / ${mediaHeight}`;
+    focusContainer.style.width = '100%';
+    focusContainer.style.height = '100%';
     focusContainer.style.maxWidth = '100%';
     focusContainer.style.maxHeight = '100%';
 }
