@@ -121,6 +121,163 @@ const MEDIA_RETRY_DELAY_MS = 3000;
 const connectionHeartbeatTimers = new Map();
 const mediaRetryTimers = new Map();
 
+// === Google Drive Integration State & Credentials ===
+const GOOGLE_CLIENT_ID = '438319694586-444djih2pr18991pe60cj71975jkfnqv.apps.googleusercontent.com';
+const GOOGLE_DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+let driveAccessToken = null;
+
+function updateDriveStatusUI(connected) {
+    const btnConnectDrive = document.getElementById('btn-connect-drive');
+    const driveStatusText = document.getElementById('drive-status-text');
+    if (!btnConnectDrive || !driveStatusText) return;
+
+    if (isAdmin || isCoHost) {
+        btnConnectDrive.classList.remove('hidden');
+        btnConnectDrive.classList.add('inline-flex');
+    }
+
+    if (connected) {
+        btnConnectDrive.classList.remove('border-sky-500/30', 'bg-sky-500/10', 'text-sky-300');
+        btnConnectDrive.classList.add('border-emerald-500/30', 'bg-emerald-500/10', 'text-emerald-300');
+        driveStatusText.textContent = 'Drive Connected';
+    } else {
+        btnConnectDrive.classList.remove('border-emerald-500/30', 'bg-emerald-500/10', 'text-emerald-300');
+        btnConnectDrive.classList.add('border-sky-500/30', 'bg-sky-500/10', 'text-sky-300');
+        driveStatusText.textContent = 'Connect Drive';
+    }
+}
+
+function requestGoogleDriveToken() {
+    return new Promise((resolve, reject) => {
+        if (driveAccessToken) {
+            return resolve(driveAccessToken);
+        }
+
+        if (typeof google === 'undefined' || !google?.accounts?.oauth2) {
+            return reject(new Error('Google Identity Services script not loaded. Please check network connection.'));
+        }
+
+        const client = google.accounts.oauth2.initTokenClient({
+            client_id: GOOGLE_CLIENT_ID,
+            scope: GOOGLE_DRIVE_SCOPE,
+            callback: (response) => {
+                if (response.error) {
+                    return reject(new Error(response.error_description || response.error));
+                }
+                driveAccessToken = response.access_token;
+                updateDriveStatusUI(true);
+                resolve(driveAccessToken);
+            },
+            error_callback: (err) => reject(err)
+        });
+
+        client.requestAccessToken();
+    });
+}
+
+async function uploadToGoogleDrive(blob, fileName) {
+    const toast = document.getElementById('drive-upload-toast');
+    const toastTitle = document.getElementById('drive-toast-title');
+    const toastStatus = document.getElementById('drive-toast-status');
+    const toastIcon = document.getElementById('drive-toast-icon');
+    const toastLink = document.getElementById('drive-toast-link');
+
+    if (toast) {
+        toast.classList.remove('hidden-section');
+        if (toastTitle) toastTitle.textContent = 'Uploading to Google Drive...';
+        if (toastStatus) toastStatus.textContent = 'Connecting...';
+        if (toastIcon) toastIcon.className = 'fa-solid fa-cloud-arrow-up text-lg animate-bounce text-sky-400';
+        if (toastLink) toastLink.classList.add('hidden');
+    }
+
+    try {
+        const token = await requestGoogleDriveToken();
+
+        if (toastStatus) toastStatus.textContent = 'Initiating Drive upload...';
+
+        const metadata = {
+            name: fileName,
+            mimeType: 'video/webm'
+        };
+
+        const initRes = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json; charset=UTF-8',
+                'X-Upload-Content-Type': 'video/webm',
+                'X-Upload-Content-Length': blob.size
+            },
+            body: JSON.stringify(metadata)
+        });
+
+        if (!initRes.ok) {
+            const errTxt = await initRes.text();
+            throw new Error(`Drive session failed (${initRes.status}): ${errTxt}`);
+        }
+
+        const uploadUrl = initRes.headers.get('Location');
+        if (!uploadUrl) {
+            throw new Error('No upload session URL received from Google Drive.');
+        }
+
+        const fileData = await new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open('PUT', uploadUrl, true);
+            xhr.setRequestHeader('Content-Type', 'video/webm');
+
+            if (xhr.upload) {
+                xhr.upload.onprogress = (evt) => {
+                    if (evt.lengthComputable && toastStatus) {
+                        const percent = Math.round((evt.loaded / evt.total) * 100);
+                        toastStatus.textContent = `${percent}% completed`;
+                    }
+                };
+            }
+
+            xhr.onload = () => {
+                if (xhr.status >= 200 && xhr.status < 300) {
+                    try {
+                        resolve(JSON.parse(xhr.responseText));
+                    } catch (e) {
+                        resolve({ id: null });
+                    }
+                } else {
+                    reject(new Error(`Upload failed with status ${xhr.status}: ${xhr.responseText}`));
+                }
+            };
+
+            xhr.onerror = () => reject(new Error('Network error during Google Drive upload.'));
+            xhr.send(blob);
+        });
+
+        if (toast) {
+            if (toastTitle) toastTitle.textContent = 'Saved to Google Drive!';
+            if (toastStatus) toastStatus.textContent = 'Upload complete';
+            if (toastIcon) toastIcon.className = 'fa-solid fa-circle-check text-lg text-emerald-400';
+
+            if (fileData?.id && toastLink) {
+                toastLink.href = `https://drive.google.com/file/d/${fileData.id}/view`;
+                toastLink.classList.remove('hidden');
+            }
+
+            setTimeout(() => {
+                toast.classList.add('hidden-section');
+            }, 12000);
+        }
+
+        return fileData;
+    } catch (err) {
+        console.error('Google Drive Upload Error:', err);
+        if (toast) {
+            if (toastTitle) toastTitle.textContent = 'Google Drive Upload Notice';
+            if (toastStatus) toastStatus.textContent = err.message || 'Error uploading file';
+            if (toastIcon) toastIcon.className = 'fa-solid fa-triangle-exclamation text-lg text-amber-400';
+            setTimeout(() => toast.classList.add('hidden-section'), 8000);
+        }
+    }
+}
+
 // === Initialization ===
 function init() {
     const localContainer = document.getElementById('video-container-local');
@@ -1211,6 +1368,19 @@ function setupEventListeners() {
     if (sidebarBackdrop) {
         sidebarBackdrop.addEventListener('click', closeMobileSidebar);
     }
+
+    const btnConnectDrive = document.getElementById('btn-connect-drive');
+    if (btnConnectDrive) {
+        btnConnectDrive.addEventListener('click', async () => {
+            try {
+                await requestGoogleDriveToken();
+                alert('Google Drive connected successfully! Recorded meeting videos will now upload directly to your Google Drive.');
+            } catch (err) {
+                console.error('Drive authorization error:', err);
+                alert('Google Drive connection failed or was cancelled: ' + (err.message || 'Permission denied'));
+            }
+        });
+    }
 }
 
 function closeMobileSidebar() {
@@ -1239,6 +1409,7 @@ async function handleAdminLogin() {
         isAdmin = true;
         myName = "Host";
         setMeetingRoleUI();
+        updateDriveStatusUI(Boolean(driveAccessToken));
         screens.adminLogin.classList.add('hidden-section');
         
         const mediaSuccess = await startLocalVideo();
@@ -2138,11 +2309,12 @@ async function startRecording() {
         mediaRecorder.onstop = function() {
             const blob = new Blob(recordedChunks, { type: 'video/webm' });
             recordedChunks = [];
+            const fileName = `meeting-record-${new Date().getTime()}.webm`;
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.style.display = 'none';
             a.href = url;
-            a.download = `meeting-record-${new Date().getTime()}.webm`;
+            a.download = fileName;
             document.body.appendChild(a);
             a.click();
             setTimeout(() => {
@@ -2150,6 +2322,9 @@ async function startRecording() {
                 window.URL.revokeObjectURL(url);
             }, 100);
             
+            // Trigger automatic Google Drive upload
+            uploadToGoogleDrive(blob, fileName);
+
             isRecording = false;
             setRecordingUI(false);
             

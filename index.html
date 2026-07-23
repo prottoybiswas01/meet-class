@@ -795,6 +795,10 @@
                             <span class="hidden lg:inline">Copy</span>
                         </button>
                     </div>
+                    <button id="btn-connect-drive" class="hidden items-center gap-1.5 rounded-full border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-xs font-semibold text-sky-300 transition hover:bg-sky-500/20" title="Connect Google Drive for auto-saving meeting recordings">
+                        <i class="fa-brands fa-google-drive text-sky-400"></i>
+                        <span id="drive-status-text">Connect Drive</span>
+                    </button>
                     <button id="btn-toggle-sidebar" class="hidden rounded-full border border-slate-700 bg-slate-900/75 p-3 text-slate-300 transition hover:border-brand-400 hover:text-white md:hidden relative">
                         <i class="fa-solid fa-users"></i>
                         <span id="mobile-request-badge" class="absolute -right-1 -top-1 hidden h-5 w-5 items-center justify-center rounded-full bg-brand-500 text-[10px] font-bold text-white">0</span>
@@ -881,6 +885,20 @@
         </footer>
     </div>
 
+    <div id="drive-upload-toast" class="hidden-section fixed bottom-20 left-1/2 -translate-x-1/2 z-[100] flex items-center gap-3.5 rounded-2xl border border-sky-500/30 bg-slate-900/95 px-5 py-3.5 text-sm text-slate-100 shadow-2xl backdrop-blur-md transition-all duration-300">
+        <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-sky-500/20 text-sky-400">
+            <i id="drive-toast-icon" class="fa-solid fa-cloud-arrow-up text-lg animate-bounce"></i>
+        </div>
+        <div class="min-w-0">
+            <p id="drive-toast-title" class="font-bold text-white">Uploading to Google Drive...</p>
+            <p id="drive-toast-status" class="text-xs text-sky-300">0% completed</p>
+        </div>
+        <a id="drive-toast-link" href="#" target="_blank" class="hidden ml-2 shrink-0 rounded-xl bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-sky-500">
+            Open Drive <i class="fa-solid fa-arrow-up-right-from-square ml-1"></i>
+        </a>
+    </div>
+
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <script src="app.js"></script>
 </body>
