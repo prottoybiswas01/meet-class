@@ -19,6 +19,26 @@ const previewSection = document.getElementById('preview-section');
 const previewVideo = document.getElementById('preview-video');
 const btnPreviewAudio = document.getElementById('btn-preview-audio');
 const btnPreviewVideo = document.getElementById('btn-preview-video');
+const btnPrejoinMic = document.getElementById('btn-prejoin-mic');
+const btnPrejoinCam = document.getElementById('btn-prejoin-cam');
+const txtPrejoinMic = document.getElementById('txt-prejoin-mic');
+const txtPrejoinCam = document.getElementById('txt-prejoin-cam');
+const iconPrejoinMic = document.getElementById('icon-prejoin-mic');
+const iconPrejoinCam = document.getElementById('icon-prejoin-cam');
+
+// Pre-Join Modal Elements
+const prejoinOptionsModal = document.getElementById('prejoin-options-modal');
+const modalCardCam = document.getElementById('modal-card-cam');
+const modalCardMic = document.getElementById('modal-card-mic');
+const modalIconCamBox = document.getElementById('modal-icon-cam-box');
+const modalIconMicBox = document.getElementById('modal-icon-mic-box');
+const modalIconCam = document.getElementById('modal-icon-cam');
+const modalIconMic = document.getElementById('modal-icon-mic');
+const modalPillCam = document.getElementById('modal-pill-cam');
+const modalPillMic = document.getElementById('modal-pill-mic');
+const modalSubCam = document.getElementById('modal-sub-cam');
+const modalSubMic = document.getElementById('modal-sub-mic');
+const btnPrejoinModalConfirm = document.getElementById('btn-prejoin-modal-confirm');
 
 // Admin Login
 const inputAdminId = document.getElementById('admin-id');
@@ -76,6 +96,7 @@ let adminPeerId = null;
 let myName = "";
 let isHandRaised = false;
 let isLocalVideoEnabled = true;
+let isLocalAudioEnabled = true;
 
 // Full Mesh state
 // peerId -> { name, connection, call, stream }
@@ -296,14 +317,17 @@ function init() {
         document.body.classList.add('invite-entry-mode');
         btnShowAdminLogin.classList.add('hidden');
         
-        // Show preview and start camera immediately for privacy check before joining
+        // Present the pre-join camera/mic modal popup so user has full control before camera starts
+        if (prejoinOptionsModal) {
+            prejoinOptionsModal.classList.remove('hidden-section');
+        }
         if (previewSection) {
             previewSection.classList.remove('hidden');
-            startLocalVideo();
         }
     } else {
         document.body.classList.remove('invite-entry-mode');
     }
+    updatePrejoinUI();
     setupEventListeners();
     if (focusVideo) {
         focusVideo.addEventListener('loadedmetadata', updateStageViewportSizing);
@@ -478,6 +502,8 @@ function createCallMetadata(extra = {}) {
     return {
         name: myName,
         role: getLocalRoleKey(),
+        isVideoEnabled: isLocalVideoEnabled,
+        isAudioEnabled: isLocalAudioEnabled,
         ...extra
     };
 }
@@ -878,51 +904,70 @@ function removeRemoteAudioButton(container) {
 }
 
 function showRemoteAudioButton(video, container) {
-    const remoteStream = video?.srcObject;
-    if (!remoteStream || remoteStream.getAudioTracks().length === 0) return;
     if (!container || container.querySelector('.remote-audio-btn')) return;
 
     const button = document.createElement('button');
-    button.className = 'remote-audio-btn absolute top-1/2 left-1/2 z-50 -translate-x-1/2 -translate-y-1/2 rounded-full bg-brand-600 px-4 py-2 text-sm font-bold text-white shadow-lg transition hover:bg-brand-500';
-    button.innerHTML = '<i class="fa-solid fa-volume-high"></i> Tap for sound';
-    button.onclick = async () => {
-        remoteAudioUnlocked = true;
-        video.muted = false;
-        video.defaultMuted = false;
-        try {
-            await video.play();
-            removeRemoteAudioButton(container);
-        } catch (err) {
-            console.error('Remote audio unlock failed:', err);
-        }
+    button.className = 'remote-audio-btn absolute top-1/2 left-1/2 z-50 -translate-x-1/2 -translate-y-1/2 rounded-full bg-brand-600 px-4 py-2.5 text-xs font-bold text-white shadow-2xl transition hover:bg-brand-500 flex items-center gap-2 border border-white/20 animate-pulse';
+    button.innerHTML = '<i class="fa-solid fa-volume-high"></i> <span>শব্দ শুনতে ট্যাপ করুন</span>';
+    button.onclick = async (e) => {
+        e.stopPropagation();
+        unlockRemoteAudioPlayback();
+        removeRemoteAudioButton(container);
     };
     container.appendChild(button);
+}
+
+function attachRemoteAudio(id, stream) {
+    if (!stream) return;
+
+    let audio = document.getElementById(`remote-audio-${id}`);
+    if (!audio) {
+        audio = document.createElement('audio');
+        audio.id = `remote-audio-${id}`;
+        audio.autoplay = true;
+        audio.playsInline = true;
+        audio.style.display = 'none';
+        document.body.appendChild(audio);
+    }
+    if (audio.srcObject !== stream) {
+        audio.srcObject = stream;
+    }
+    audio.muted = false;
+    audio.defaultMuted = false;
+    audio.volume = 1.0;
+
+    const playPromise = audio.play();
+    if (playPromise !== undefined) {
+        playPromise.catch(err => {
+            console.debug('Autoplay deferred for remote audio until user interaction:', id, err);
+            const container = document.getElementById(`video-container-${id}`);
+            if (container) showRemoteAudioButton(null, container);
+        });
+    }
 }
 
 async function syncRemoteVideoPlayback(video, container) {
     if (!video) return;
 
+    if (video.id === 'local-video' || container?.id === 'video-container-local') {
+        video.muted = true;
+        video.defaultMuted = true;
+        video.play().catch(() => {});
+        return;
+    }
+
     video.autoplay = true;
     video.playsInline = true;
     video.dataset.remoteVideo = 'true';
-
-    if (!remoteAudioUnlocked) {
-        video.muted = true;
-        video.defaultMuted = true;
-    }
+    video.muted = false;
+    video.defaultMuted = false;
+    video.volume = 1.0;
 
     try {
         await video.play();
-        if (remoteAudioUnlocked) {
-            video.muted = false;
-            video.defaultMuted = false;
-            await video.play();
-            removeRemoteAudioButton(container);
-        } else {
-            showRemoteAudioButton(video, container);
-        }
+        removeRemoteAudioButton(container);
     } catch (err) {
-        console.error('Remote video autoplay blocked:', err);
+        console.warn('Initial unmuted video play blocked, falling back to muted video + audio element:', err);
         video.muted = true;
         video.defaultMuted = true;
         try {
@@ -935,17 +980,34 @@ async function syncRemoteVideoPlayback(video, container) {
 }
 
 function unlockRemoteAudioPlayback() {
-    if (remoteAudioUnlocked) return;
     remoteAudioUnlocked = true;
+
+    if (audioContext && audioContext.state === 'suspended') {
+        audioContext.resume().catch(() => {});
+    }
+
+    document.querySelectorAll('audio[id^="remote-audio-"]').forEach(audio => {
+        audio.muted = false;
+        audio.defaultMuted = false;
+        audio.volume = 1.0;
+        if (audio.paused) {
+            audio.play().catch(err => console.debug('Audio element play retry:', err));
+        }
+    });
 
     document.querySelectorAll('video[data-remote-video="true"]').forEach(video => {
         video.muted = false;
         video.defaultMuted = false;
-        video.play().catch(err => {
-            console.error('Bulk remote audio unlock failed:', err);
+        video.volume = 1.0;
+        if (video.paused) {
+            video.play().catch(err => {
+                const container = video.closest('.video-container');
+                if (container) showRemoteAudioButton(video, container);
+            });
+        } else {
             const container = video.closest('.video-container');
-            showRemoteAudioButton(video, container);
-        });
+            if (container) removeRemoteAudioButton(container);
+        }
     });
 }
 
@@ -1259,7 +1321,15 @@ async function startLocalVideo() {
 
         localVideo.srcObject = localStream;
         if (previewVideo) previewVideo.srcObject = localStream;
-        setParticipantVideoState('local', localStream.getVideoTracks()[0].enabled, 'You');
+
+        const vTrack = localStream.getVideoTracks()[0];
+        if (vTrack) vTrack.enabled = isLocalVideoEnabled;
+        const aTrack = localStream.getAudioTracks()[0];
+        if (aTrack) aTrack.enabled = isLocalAudioEnabled;
+
+        setParticipantVideoState('local', isLocalVideoEnabled, 'You');
+        updatePrejoinUI();
+        updateMediaButtonStates();
         return true;
     } catch (err) {
         console.error("Error accessing media devices.", err);
@@ -1284,6 +1354,120 @@ function getActiveStream() {
     return localStream;
 }
 
+// === Pre-Join & Media Preferences Handling ===
+function updateMediaButtonStates() {
+    if (btnToggleAudio) {
+        btnToggleAudio.innerHTML = isLocalAudioEnabled ? '<i class="fa-solid fa-microphone text-base"></i>' : '<i class="fa-solid fa-microphone-slash text-base"></i>';
+        btnToggleAudio.classList.toggle('bg-slate-800', isLocalAudioEnabled);
+        btnToggleAudio.classList.toggle('bg-red-600', !isLocalAudioEnabled);
+    }
+    if (btnToggleVideo) {
+        btnToggleVideo.innerHTML = isLocalVideoEnabled ? '<i class="fa-solid fa-video text-base"></i>' : '<i class="fa-solid fa-video-slash text-base"></i>';
+        btnToggleVideo.classList.toggle('bg-slate-800', isLocalVideoEnabled);
+        btnToggleVideo.classList.toggle('bg-red-600', !isLocalVideoEnabled);
+    }
+}
+
+function updatePrejoinUI() {
+    // 1. Join Card Buttons
+    if (btnPrejoinCam && txtPrejoinCam && iconPrejoinCam) {
+        if (isLocalVideoEnabled) {
+            btnPrejoinCam.className = 'flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-300 text-xs font-bold transition hover:bg-emerald-500/20 active:scale-95';
+            iconPrejoinCam.className = 'fa-solid fa-video text-sm';
+            txtPrejoinCam.textContent = 'Cam: ON';
+        } else {
+            btnPrejoinCam.className = 'flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl border border-rose-500/30 bg-rose-500/10 text-rose-300 text-xs font-bold transition hover:bg-rose-500/20 active:scale-95';
+            iconPrejoinCam.className = 'fa-solid fa-video-slash text-sm text-rose-400';
+            txtPrejoinCam.textContent = 'Cam: OFF';
+        }
+    }
+
+    if (btnPrejoinMic && txtPrejoinMic && iconPrejoinMic) {
+        if (isLocalAudioEnabled) {
+            btnPrejoinMic.className = 'flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-300 text-xs font-bold transition hover:bg-emerald-500/20 active:scale-95';
+            iconPrejoinMic.className = 'fa-solid fa-microphone text-sm';
+            txtPrejoinMic.textContent = 'Mic: ON';
+        } else {
+            btnPrejoinMic.className = 'flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl border border-rose-500/30 bg-rose-500/10 text-rose-300 text-xs font-bold transition hover:bg-rose-500/20 active:scale-95';
+            iconPrejoinMic.className = 'fa-solid fa-microphone-slash text-sm text-rose-400';
+            txtPrejoinMic.textContent = 'Mic: OFF';
+        }
+    }
+
+    // 2. Pre-Join Modal Cards
+    if (modalCardCam && modalPillCam && modalSubCam && modalIconCam && modalIconCamBox) {
+        if (isLocalVideoEnabled) {
+            modalCardCam.className = 'cursor-pointer select-none rounded-2xl border p-4 transition-all duration-200 flex flex-col justify-between h-28 border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/15';
+            modalIconCamBox.className = 'flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-500/20 text-emerald-400';
+            modalIconCam.className = 'fa-solid fa-video text-sm';
+            modalPillCam.className = 'rounded-full bg-emerald-500/20 border border-emerald-500/30 px-2 py-0.5 text-[10px] font-bold text-emerald-300 uppercase';
+            modalPillCam.textContent = 'চালু (ON)';
+            modalSubCam.className = 'text-[10px] text-emerald-400 font-semibold';
+            modalSubCam.textContent = 'ভিডিও চালু থাকবে';
+        } else {
+            modalCardCam.className = 'cursor-pointer select-none rounded-2xl border p-4 transition-all duration-200 flex flex-col justify-between h-28 border-rose-500/40 bg-rose-500/10 hover:bg-rose-500/15';
+            modalIconCamBox.className = 'flex h-9 w-9 items-center justify-center rounded-xl bg-rose-500/20 text-rose-400';
+            modalIconCam.className = 'fa-solid fa-video-slash text-sm';
+            modalPillCam.className = 'rounded-full bg-rose-500/20 border border-rose-500/30 px-2 py-0.5 text-[10px] font-bold text-rose-300 uppercase';
+            modalPillCam.textContent = 'বন্ধ (OFF)';
+            modalSubCam.className = 'text-[10px] text-rose-400 font-semibold';
+            modalSubCam.textContent = 'ক্যামেরা বন্ধ থাকবে';
+        }
+    }
+
+    if (modalCardMic && modalPillMic && modalSubMic && modalIconMic && modalIconMicBox) {
+        if (isLocalAudioEnabled) {
+            modalCardMic.className = 'cursor-pointer select-none rounded-2xl border p-4 transition-all duration-200 flex flex-col justify-between h-28 border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/15';
+            modalIconMicBox.className = 'flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-500/20 text-emerald-400';
+            modalIconMic.className = 'fa-solid fa-microphone text-sm';
+            modalPillMic.className = 'rounded-full bg-emerald-500/20 border border-emerald-500/30 px-2 py-0.5 text-[10px] font-bold text-emerald-300 uppercase';
+            modalPillMic.textContent = 'চালু (ON)';
+            modalSubMic.className = 'text-[10px] text-emerald-400 font-semibold';
+            modalSubMic.textContent = 'কথা বলা যাবে';
+        } else {
+            modalCardMic.className = 'cursor-pointer select-none rounded-2xl border p-4 transition-all duration-200 flex flex-col justify-between h-28 border-rose-500/40 bg-rose-500/10 hover:bg-rose-500/15';
+            modalIconMicBox.className = 'flex h-9 w-9 items-center justify-center rounded-xl bg-rose-500/20 text-rose-400';
+            modalIconMic.className = 'fa-solid fa-microphone-slash text-sm';
+            modalPillMic.className = 'rounded-full bg-rose-500/20 border border-rose-500/30 px-2 py-0.5 text-[10px] font-bold text-rose-300 uppercase';
+            modalPillMic.textContent = 'বন্ধ (OFF)';
+            modalSubMic.className = 'text-[10px] text-rose-400 font-semibold';
+            modalSubMic.textContent = 'মাইক্রোফোন মিউট থাকবে';
+        }
+    }
+
+    // 3. Preview Section Buttons
+    if (btnPreviewAudio) {
+        btnPreviewAudio.innerHTML = isLocalAudioEnabled ? '<i class="fa-solid fa-microphone"></i>' : '<i class="fa-solid fa-microphone-slash"></i>';
+        btnPreviewAudio.classList.toggle('bg-slate-800', isLocalAudioEnabled);
+        btnPreviewAudio.classList.toggle('bg-red-600', !isLocalAudioEnabled);
+    }
+
+    if (btnPreviewVideo) {
+        btnPreviewVideo.innerHTML = isLocalVideoEnabled ? '<i class="fa-solid fa-video"></i>' : '<i class="fa-solid fa-video-slash"></i>';
+        btnPreviewVideo.classList.toggle('bg-slate-800', isLocalVideoEnabled);
+        btnPreviewVideo.classList.toggle('bg-red-600', !isLocalVideoEnabled);
+    }
+}
+
+function togglePrejoinCam() {
+    isLocalVideoEnabled = !isLocalVideoEnabled;
+    updatePrejoinUI();
+    if (localStream) {
+        const vTrack = localStream.getVideoTracks()[0];
+        if (vTrack) vTrack.enabled = isLocalVideoEnabled;
+        if (previewVideo) previewVideo.style.opacity = isLocalVideoEnabled ? '1' : '0.3';
+    }
+}
+
+function togglePrejoinMic() {
+    isLocalAudioEnabled = !isLocalAudioEnabled;
+    updatePrejoinUI();
+    if (localStream) {
+        const aTrack = localStream.getAudioTracks()[0];
+        if (aTrack) aTrack.enabled = isLocalAudioEnabled;
+    }
+}
+
 // === Event Listeners ===
 function setupEventListeners() {
     btnShowAdminLogin.addEventListener('click', () => screens.adminLogin.classList.remove('hidden-section'));
@@ -1297,11 +1481,27 @@ function setupEventListeners() {
     btnToggleVideo.addEventListener('click', toggleVideo);
     btnLeave.addEventListener('click', leaveMeeting);
     
-    // Preview Buttons
-    if (btnPreviewAudio) btnPreviewAudio.addEventListener('click', toggleAudio);
-    if (btnPreviewVideo) btnPreviewVideo.addEventListener('click', toggleVideo);
-    document.addEventListener('click', unlockRemoteAudioPlayback, { passive: true, once: true });
-    document.addEventListener('touchstart', unlockRemoteAudioPlayback, { passive: true, once: true });
+    // Pre-join & Preview buttons
+    if (btnPrejoinCam) btnPrejoinCam.addEventListener('click', togglePrejoinCam);
+    if (btnPrejoinMic) btnPrejoinMic.addEventListener('click', togglePrejoinMic);
+    if (btnPreviewAudio) btnPreviewAudio.addEventListener('click', togglePrejoinMic);
+    if (btnPreviewVideo) btnPreviewVideo.addEventListener('click', togglePrejoinCam);
+
+    // Pre-join Modal interactions
+    if (modalCardCam) modalCardCam.addEventListener('click', togglePrejoinCam);
+    if (modalCardMic) modalCardMic.addEventListener('click', togglePrejoinMic);
+    if (btnPrejoinModalConfirm) {
+        btnPrejoinModalConfirm.addEventListener('click', () => {
+            if (prejoinOptionsModal) prejoinOptionsModal.classList.add('hidden-section');
+            if (isLocalVideoEnabled) {
+                startLocalVideo();
+            }
+        });
+    }
+    
+    // Continuous audio unlock on any document interaction
+    document.addEventListener('click', unlockRemoteAudioPlayback, { passive: true });
+    document.addEventListener('touchstart', unlockRemoteAudioPlayback, { passive: true });
     document.addEventListener('fullscreenchange', handleBrowserFullscreenChange);
     document.addEventListener('webkitfullscreenchange', handleBrowserFullscreenChange);
     window.addEventListener('pagehide', () => {
@@ -1464,6 +1664,15 @@ async function handleUserJoinRequest() {
     const mediaSuccess = await startLocalVideo();
     if(!mediaSuccess) return;
 
+    if (localStream) {
+        const vTrack = localStream.getVideoTracks()[0];
+        if (vTrack) vTrack.enabled = isLocalVideoEnabled;
+        const aTrack = localStream.getAudioTracks()[0];
+        if (aTrack) aTrack.enabled = isLocalAudioEnabled;
+    }
+    setParticipantVideoState('local', isLocalVideoEnabled, 'You');
+    updateMediaButtonStates();
+
     showScreen('waiting');
     await initializePeer();
 }
@@ -1515,10 +1724,20 @@ async function initializePeer() {
             inputInviteLink.value = buildInviteLink(id);
         } else {
             // User joins Admin
-            const conn = peer.connect(adminPeerId, {metadata: {name: myName, role: getLocalRoleKey()}});
+            const conn = peer.connect(adminPeerId, {metadata: {
+                name: myName,
+                role: getLocalRoleKey(),
+                isVideoEnabled: isLocalVideoEnabled,
+                isAudioEnabled: isLocalAudioEnabled
+            }});
             peersData.set(adminPeerId, {name: "Host", connection: conn, role: 'host'});
             
-            conn.on('open', () => conn.send({ type: 'request-join', name: myName }));
+            conn.on('open', () => conn.send({
+                type: 'request-join',
+                name: myName,
+                isVideoEnabled: isLocalVideoEnabled,
+                isAudioEnabled: isLocalAudioEnabled
+            }));
             setupConnectionListeners(conn);
         }
     });
@@ -1533,7 +1752,8 @@ async function initializePeer() {
             pendingRequests.set(conn.peer, {
                 name: remoteName,
                 conn,
-                isVideoEnabled: conn.currentVideoEnabled !== false
+                isVideoEnabled: conn.metadata?.isVideoEnabled !== false,
+                isAudioEnabled: conn.metadata?.isAudioEnabled !== false
             });
             updateRequestsUI();
             
@@ -1610,7 +1830,8 @@ function setupConnectionListeners(conn) {
                 pendingRequests.set(conn.peer, {
                     name: data.name,
                     conn,
-                    isVideoEnabled: conn.currentVideoEnabled !== false
+                    isVideoEnabled: data.isVideoEnabled !== false,
+                    isAudioEnabled: data.isAudioEnabled !== false
                 });
                 updateRequestsUI();
             }
@@ -1901,6 +2122,9 @@ function addVideoStream(id, stream, name) {
     
     if (container) {
         // If container exists but stream changed (e.g. they reconnected quickly or audio track was added)
+        if (id !== 'local') {
+            attachRemoteAudio(id, stream);
+        }
         const video = container.querySelector('video');
         if (video.srcObject !== stream) {
             video.srcObject = stream;
@@ -1918,14 +2142,27 @@ function addVideoStream(id, stream, name) {
     container.className = 'video-container shadow-lg';
 
     const video = document.createElement('video');
-    video.srcObject = stream;
     video.autoplay = true;
     video.playsInline = true;
+    if (id === 'local') {
+        video.muted = true;
+        video.defaultMuted = true;
+    } else {
+        video.muted = false;
+        video.defaultMuted = false;
+        video.volume = 1.0;
+    }
+    video.srcObject = stream;
     
-    // Explicitly play video to prevent mobile browsers from freezing the first frame or blocking audio
+    // Explicitly sync playback immediately AND on metadata loaded
+    syncRemoteVideoPlayback(video, container);
     video.onloadedmetadata = () => {
         syncRemoteVideoPlayback(video, container);
     };
+
+    if (id !== 'local') {
+        attachRemoteAudio(id, stream);
+    }
 
     const label = document.createElement('div');
     label.className = 'name-label';
@@ -2013,6 +2250,8 @@ function removeUser(id) {
 
     const el = document.getElementById(`video-container-${id}`);
     if (el) el.remove();
+    const remoteAudioEl = document.getElementById(`remote-audio-${id}`);
+    if (remoteAudioEl) remoteAudioEl.remove();
     peersData.delete(id);
     
     updateActiveCount();
@@ -2029,60 +2268,24 @@ function toggleAudio() {
         alert('Microphone is not available on this device/browser right now.');
         return;
     }
-    if (audioTrack.enabled) {
-        audioTrack.enabled = false;
-        btnToggleAudio.innerHTML = '<i class="fa-solid fa-microphone-slash"></i>';
-        btnToggleAudio.classList.remove('bg-slate-800');
-        btnToggleAudio.classList.add('bg-red-600');
-        if (btnPreviewAudio) {
-            btnPreviewAudio.innerHTML = '<i class="fa-solid fa-microphone-slash"></i>';
-            btnPreviewAudio.classList.remove('bg-slate-800');
-            btnPreviewAudio.classList.add('bg-red-600');
-        }
-    } else {
-        audioTrack.enabled = true;
-        btnToggleAudio.innerHTML = '<i class="fa-solid fa-microphone"></i>';
-        btnToggleAudio.classList.remove('bg-red-600');
-        btnToggleAudio.classList.add('bg-slate-800');
-        if (btnPreviewAudio) {
-            btnPreviewAudio.innerHTML = '<i class="fa-solid fa-microphone"></i>';
-            btnPreviewAudio.classList.remove('bg-red-600');
-            btnPreviewAudio.classList.add('bg-slate-800');
-        }
-    }
+    isLocalAudioEnabled = !audioTrack.enabled;
+    audioTrack.enabled = isLocalAudioEnabled;
+    updateMediaButtonStates();
+    updatePrejoinUI();
 }
 
 function toggleVideo() {
     if(!localStream) return;
     const videoTrack = localStream.getVideoTracks()[0];
-    if (videoTrack.enabled) {
-        videoTrack.enabled = false;
-        isLocalVideoEnabled = false;
-        btnToggleVideo.innerHTML = '<i class="fa-solid fa-video-slash"></i>';
-        btnToggleVideo.classList.remove('bg-slate-800');
-        btnToggleVideo.classList.add('bg-red-600');
-        setParticipantVideoState('local', false, 'You');
-        if (btnPreviewVideo) {
-            btnPreviewVideo.innerHTML = '<i class="fa-solid fa-video-slash"></i>';
-            btnPreviewVideo.classList.remove('bg-slate-800');
-            btnPreviewVideo.classList.add('bg-red-600');
-            previewVideo.style.opacity = '0.3';
-        }
-    } else {
-        videoTrack.enabled = true;
-        isLocalVideoEnabled = true;
-        btnToggleVideo.innerHTML = '<i class="fa-solid fa-video"></i>';
-        btnToggleVideo.classList.remove('bg-red-600');
-        btnToggleVideo.classList.add('bg-slate-800');
-        setParticipantVideoState('local', true, 'You');
-        if (btnPreviewVideo) {
-            btnPreviewVideo.innerHTML = '<i class="fa-solid fa-video"></i>';
-            btnPreviewVideo.classList.remove('bg-red-600');
-            btnPreviewVideo.classList.add('bg-slate-800');
-            previewVideo.style.opacity = '1';
-        }
+    if (!videoTrack) return;
+    isLocalVideoEnabled = !videoTrack.enabled;
+    videoTrack.enabled = isLocalVideoEnabled;
+    setParticipantVideoState('local', isLocalVideoEnabled, 'You');
+    updateMediaButtonStates();
+    if (previewVideo) {
+        previewVideo.style.opacity = isLocalVideoEnabled ? '1' : '0.3';
     }
-
+    updatePrejoinUI();
     broadcastLocalVideoState();
 }
 

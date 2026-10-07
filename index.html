@@ -1061,6 +1061,24 @@
                                     <input type="text" id="join-name" placeholder="Enter your display name..." class="input-glow w-full rounded-2xl border border-slate-700/80 bg-slate-900/90 pl-11 pr-4 py-3.5 text-sm text-white placeholder-slate-500 outline-none transition duration-200">
                                 </div>
 
+                                <!-- Pre-Join Camera & Mic Preference Toggles -->
+                                <div class="mt-4 rounded-2xl border border-white/10 bg-slate-900/60 p-3.5 flex flex-col gap-2.5">
+                                    <div class="flex items-center justify-between text-xs">
+                                        <span class="font-semibold text-slate-300"><i class="fa-solid fa-sliders text-sky-400 mr-1.5"></i> Before joining:</span>
+                                        <span class="text-[11px] text-slate-400">Click to turn ON/OFF</span>
+                                    </div>
+                                    <div class="grid grid-cols-2 gap-2.5">
+                                        <button type="button" id="btn-prejoin-mic" class="flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-300 text-xs font-bold transition hover:bg-emerald-500/20 active:scale-95" title="Toggle Mic before joining">
+                                            <i id="icon-prejoin-mic" class="fa-solid fa-microphone text-sm"></i>
+                                            <span id="txt-prejoin-mic">Mic: ON</span>
+                                        </button>
+                                        <button type="button" id="btn-prejoin-cam" class="flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-300 text-xs font-bold transition hover:bg-emerald-500/20 active:scale-95" title="Toggle Camera before joining">
+                                            <i id="icon-prejoin-cam" class="fa-solid fa-video text-sm"></i>
+                                            <span id="txt-prejoin-cam">Cam: ON</span>
+                                        </button>
+                                    </div>
+                                </div>
+
                                 <button id="btn-request-join" class="group mt-4 w-full rounded-2xl bg-gradient-to-r from-brand-600 via-sky-500 to-blue-600 px-5 py-3.5 text-sm font-bold text-white shadow-glow-brand transition duration-200 hover:from-brand-500 hover:to-blue-500 active:scale-[0.98] flex items-center justify-center gap-2">
                                     <span>Ask to Join Room</span>
                                     <i class="fa-solid fa-arrow-right text-xs transition-transform group-hover:translate-x-1"></i>
@@ -1182,6 +1200,59 @@
                 <span class="inline-block h-2 w-2 rounded-full bg-sky-400 animate-ping"></span>
                 Please keep this tab open...
             </div>
+        </div>
+    </div>
+
+    <!-- ==================== PRE-JOIN ENTRY POPUP / MODAL ==================== -->
+    <div id="prejoin-options-modal" class="hidden-section fixed inset-0 z-[95] flex items-center justify-center bg-black/85 p-4 backdrop-blur-2xl">
+        <div class="panel-elevated relative w-full max-w-md rounded-[2.5rem] p-7 md:p-9 text-center shadow-2xl border border-brand-500/30 animate-in fade-in zoom-in-95 duration-200">
+            <!-- Glow background -->
+            <div class="absolute -right-8 -top-8 h-36 w-36 rounded-full bg-brand-500/20 blur-3xl pointer-events-none"></div>
+
+            <div class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-tr from-brand-600 to-sky-400 text-white shadow-glow-brand">
+                <i class="fa-solid fa-sliders text-2xl"></i>
+            </div>
+            <h2 class="display-font text-2xl font-bold text-white tracking-tight">মিটিংয়ে যোগদানের প্রস্তুতি</h2>
+            <p class="mt-2 text-xs leading-5 text-slate-300">
+                আপনি ক্লাসে প্রবেশের পূর্বে ক্যামেরা এবং মাইক্রোফোন অন বা অফ রাখতে পারেন। আপনার পছন্দমতো নির্বাচন করুন:
+            </p>
+
+            <!-- Toggle Selector Grid -->
+            <div class="mt-6 grid grid-cols-2 gap-3.5 text-left">
+                <!-- Camera Choice -->
+                <div id="modal-card-cam" class="cursor-pointer select-none rounded-2xl border p-4 transition-all duration-200 flex flex-col justify-between h-28 border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/15">
+                    <div class="flex items-center justify-between">
+                        <div id="modal-icon-cam-box" class="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-500/20 text-emerald-400">
+                            <i id="modal-icon-cam" class="fa-solid fa-video text-sm"></i>
+                        </div>
+                        <span id="modal-pill-cam" class="rounded-full bg-emerald-500/20 border border-emerald-500/30 px-2 py-0.5 text-[10px] font-bold text-emerald-300 uppercase">চালু (ON)</span>
+                    </div>
+                    <div>
+                        <span class="block text-xs font-bold text-white">ক্যামেরা (Camera)</span>
+                        <span id="modal-sub-cam" class="text-[10px] text-emerald-400 font-semibold">ভিডিও চালু থাকবে</span>
+                    </div>
+                </div>
+
+                <!-- Microphone Choice -->
+                <div id="modal-card-mic" class="cursor-pointer select-none rounded-2xl border p-4 transition-all duration-200 flex flex-col justify-between h-28 border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/15">
+                    <div class="flex items-center justify-between">
+                        <div id="modal-icon-mic-box" class="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-500/20 text-emerald-400">
+                            <i id="modal-icon-mic" class="fa-solid fa-microphone text-sm"></i>
+                        </div>
+                        <span id="modal-pill-mic" class="rounded-full bg-emerald-500/20 border border-emerald-500/30 px-2 py-0.5 text-[10px] font-bold text-emerald-300 uppercase">চালু (ON)</span>
+                    </div>
+                    <div>
+                        <span class="block text-xs font-bold text-white">মাইক্রোফোন (Mic)</span>
+                        <span id="modal-sub-mic" class="text-[10px] text-emerald-400 font-semibold">কথা বলা যাবে</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Confirm Button -->
+            <button id="btn-prejoin-modal-confirm" class="mt-6 w-full rounded-2xl bg-gradient-to-r from-brand-600 via-sky-500 to-blue-600 px-5 py-3.5 text-sm font-bold text-white shadow-glow-brand transition duration-200 hover:from-brand-500 hover:to-blue-500 active:scale-[0.98] flex items-center justify-center gap-2">
+                <span>ঠিক আছে, যোগদানের জন্য প্রস্তুত</span>
+                <i class="fa-solid fa-arrow-right text-xs"></i>
+            </button>
         </div>
     </div>
 
