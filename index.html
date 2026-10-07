@@ -196,37 +196,60 @@
             display: flex !important;
             align-items: center;
             justify-content: center;
+            width: 100%;
+            height: 100%;
+            padding: 0.25rem;
         }
 
         .video-grid.single-user .video-container {
             width: 100%;
-            height: 100%;
-            max-width: 100%;
-            max-height: 100%;
+            max-width: min(100%, 78rem);
+            height: auto;
+            max-height: calc(100vh - 175px);
+            aspect-ratio: 16 / 9;
+            margin: auto;
+            border-radius: 2rem;
+            box-shadow: 0 30px 80px -15px rgba(0, 0, 0, 0.85), 0 0 45px -10px rgba(14, 165, 233, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+        }
+
+        .video-grid.multi-user {
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            grid-auto-rows: auto;
+            align-content: center;
+            justify-content: center;
+            overflow-y: auto;
+            padding: 0.5rem;
+            gap: 1rem;
         }
 
         .video-grid.multi-user .video-container {
             height: auto;
-            min-height: 12rem;
-            aspect-ratio: 4 / 3;
+            min-height: 14rem;
+            aspect-ratio: 16 / 9;
+            border-radius: 1.5rem;
         }
 
         @media (max-width: 768px) {
             .video-grid.multi-user {
-                grid-template-columns: repeat(2, minmax(0, 1fr));
-                gap: 0.75rem;
-                align-content: start;
+                grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+                gap: 0.65rem;
+                align-content: center;
+                padding: 0.25rem;
             }
 
             .video-grid.single-user .video-container {
                 width: 100%;
                 height: auto;
-                aspect-ratio: 4 / 3;
+                max-height: calc(100vh - 200px);
+                aspect-ratio: 16 / 9;
+                border-radius: 1.25rem;
             }
 
             .video-grid.multi-user .video-container {
-                min-height: 0;
-                aspect-ratio: 1 / 1.08;
+                min-height: 9.5rem;
+                aspect-ratio: 16 / 10;
+                border-radius: 1.15rem;
             }
         }
 
@@ -1245,15 +1268,15 @@
         <!-- Main Workspace (Video Area + Admin Sidebar) -->
         <main class="flex-1 flex overflow-hidden relative min-h-0">
             
-            <!-- Video & Stage Area -->
-            <div id="video-area" class="flex-1 min-h-0 p-3 md:p-5 flex flex-col gap-4 overflow-hidden">
+            <!-- Video & Stage Area (Immersive Edge-to-Edge Canvas) -->
+            <div id="video-area" class="flex-1 min-h-0 p-3 md:p-6 pb-24 md:pb-24 flex flex-col gap-4 overflow-hidden relative">
                 
                 <!-- Presentation Stage Panel (Toggled when screen is shared) -->
-                <section id="focus-panel" class="focus-panel panel hidden min-h-0 flex-1 flex-col rounded-[2rem] p-3 md:p-4 border-brand-500/30">
-                    <div id="focus-container" class="flex flex-1 min-h-0 overflow-hidden rounded-[1.6rem] border border-white/10 bg-black relative shadow-2xl">
+                <section id="focus-panel" class="focus-panel hidden min-h-0 flex-1 flex-col overflow-hidden relative">
+                    <div id="focus-container" class="flex flex-1 min-h-0 overflow-hidden rounded-[2rem] border border-brand-500/35 bg-black relative shadow-2xl">
                         <video id="focus-video" autoplay playsinline class="h-full w-full object-contain"></video>
                         <div id="focus-placeholder" class="hidden"></div>
-                        <div id="focus-name" class="name-label !bg-black/75 !border-brand-500/30">
+                        <div id="focus-name" class="name-label !bg-black/80 !border-brand-500/40">
                             <i class="fa-solid fa-display text-sky-400 text-xs"></i> 
                             <span id="stage-title">Presentation Stage</span>
                             <span id="stage-copy" class="hidden"></span>
@@ -1269,14 +1292,10 @@
                     </div>
                 </section>
 
-                <!-- Participants Video Panel -->
-                <section id="participants-panel" class="panel flex min-h-0 flex-1 flex-col rounded-[2rem] p-3 md:p-4">
-                    <div class="participants-header mb-3 flex flex-wrap items-center justify-between gap-2 px-1">
-                        <div>
-                            <p class="eyebrow"><i class="fa-solid fa-circle text-[8px] text-emerald-400 mr-1 animate-pulse"></i> Classroom Feeds</p>
-                            <h3 class="mt-0.5 text-base md:text-lg font-bold text-white tracking-tight">Active Participants</h3>
-                        </div>
-                        <p id="grid-copy" class="text-xs text-slate-400">Fixed camera view with voice tracking.</p>
+                <!-- Participants Video Panel (Full-Bleed, Zero-Clutter Video Canvas) -->
+                <section id="participants-panel" class="flex min-h-0 flex-1 flex-col overflow-hidden relative">
+                    <div class="participants-header hidden">
+                        <p id="grid-copy"></p>
                     </div>
 
                     <!-- Responsive Multi-peer Video Grid -->
@@ -1292,8 +1311,8 @@
 
             </div>
 
-            <!-- Host Requests Sidebar (Drawer on mobile, split panel on desktop) -->
-            <div id="admin-sidebar" class="hidden absolute right-0 top-0 h-full w-full max-w-[350px] flex-col border-l border-white/8 bg-slate-950/95 backdrop-blur-2xl z-40 transform translate-x-full md:static md:flex md:translate-x-0 shadow-[-15px_0_35px_rgba(0,0,0,0.6)]">
+            <!-- Host Requests Sidebar (Drawer on mobile, slide panel on desktop) -->
+            <div id="admin-sidebar" class="hidden absolute right-0 top-0 h-full w-full max-w-[350px] flex-col border-l border-white/10 bg-slate-950/95 backdrop-blur-2xl z-40 transform translate-x-full md:relative md:translate-x-0 shadow-[-15px_0_35px_rgba(0,0,0,0.6)]">
                 <div class="flex items-center justify-between border-b border-white/8 px-6 py-5">
                     <div>
                         <p class="eyebrow"><i class="fa-solid fa-shield text-xs"></i> Host Controls</p>
@@ -1318,37 +1337,37 @@
             <div id="sidebar-backdrop" class="hidden md:hidden absolute inset-0 bg-black/60 z-30 opacity-0 transition-opacity duration-300 pointer-events-none backdrop-blur-sm"></div>
         </main>
 
-        <!-- Studio Control Dock (Floating Footer Bar) -->
-        <footer id="meeting-footer" class="border-t border-white/8 bg-slate-950/80 px-4 py-3 backdrop-blur-2xl md:px-6 relative z-30">
-            <div class="footer-inner mx-auto flex w-full max-w-3xl flex-wrap items-center justify-center gap-3.5 rounded-full border border-white/10 bg-slate-900/90 px-4 py-2.5 shadow-2xl">
+        <!-- Studio Control Dock (Floating Google Meet / Apple Style Dock) -->
+        <footer id="meeting-footer" class="fixed left-0 right-0 bottom-4 z-50 flex justify-center pointer-events-none px-4">
+            <div class="footer-inner pointer-events-auto flex items-center justify-center gap-3 md:gap-4 rounded-full border border-white/12 bg-slate-950/85 px-4 md:px-5 py-2.5 md:py-3 shadow-2xl backdrop-blur-2xl">
                 
                 <!-- Toggle Audio -->
-                <button id="btn-toggle-audio" class="control-dock-btn flex h-12 w-12 items-center justify-center rounded-full bg-slate-800 text-white shadow-md transition hover:bg-slate-700 focus:outline-none" title="Toggle Microphone">
+                <button id="btn-toggle-audio" class="control-dock-btn flex h-12 w-12 md:h-13 md:w-13 items-center justify-center rounded-full bg-slate-800 text-white shadow-md transition hover:bg-slate-700 focus:outline-none" title="Toggle Microphone">
                     <i class="fa-solid fa-microphone text-base"></i>
                 </button>
                 
                 <!-- Toggle Video -->
-                <button id="btn-toggle-video" class="control-dock-btn flex h-12 w-12 items-center justify-center rounded-full bg-slate-800 text-white shadow-md transition hover:bg-slate-700 focus:outline-none" title="Toggle Camera">
+                <button id="btn-toggle-video" class="control-dock-btn flex h-12 w-12 md:h-13 md:w-13 items-center justify-center rounded-full bg-slate-800 text-white shadow-md transition hover:bg-slate-700 focus:outline-none" title="Toggle Camera">
                     <i class="fa-solid fa-video text-base"></i>
                 </button>
                 
                 <!-- Screen Share -->
-                <button id="btn-screen-share" class="control-dock-btn flex h-12 w-12 items-center justify-center rounded-full bg-slate-800 text-slate-300 shadow-md transition hover:bg-brand-600 hover:text-white focus:outline-none" title="Share Screen">
+                <button id="btn-screen-share" class="control-dock-btn flex h-12 w-12 md:h-13 md:w-13 items-center justify-center rounded-full bg-slate-800 text-slate-300 shadow-md transition hover:bg-brand-600 hover:text-white focus:outline-none" title="Share Screen">
                     <i class="fa-solid fa-display text-base"></i>
                 </button>
                 
                 <!-- Raise Hand -->
-                <button id="btn-raise-hand" class="control-dock-btn flex h-12 w-12 items-center justify-center rounded-full bg-slate-800 text-slate-300 shadow-md transition hover:bg-amber-500 hover:text-white focus:outline-none" title="Raise Hand">
+                <button id="btn-raise-hand" class="control-dock-btn flex h-12 w-12 md:h-13 md:w-13 items-center justify-center rounded-full bg-slate-800 text-slate-300 shadow-md transition hover:bg-amber-500 hover:text-white focus:outline-none" title="Raise Hand">
                     <i class="fa-solid fa-hand text-base"></i>
                 </button>
                 
                 <!-- Record (Host only) -->
-                <button id="btn-record" class="control-dock-btn hidden h-12 w-12 items-center justify-center rounded-full bg-slate-800 text-slate-300 shadow-md transition hover:bg-rose-600 hover:text-white focus:outline-none" title="Record Meeting">
+                <button id="btn-record" class="control-dock-btn hidden h-12 w-12 md:h-13 md:w-13 items-center justify-center rounded-full bg-slate-800 text-slate-300 shadow-md transition hover:bg-rose-600 hover:text-white focus:outline-none" title="Record Meeting">
                     <i class="fa-solid fa-record-vinyl text-base"></i>
                 </button>
                 
                 <!-- Leave Call -->
-                <button id="btn-leave" class="control-dock-btn flex h-12 w-14 items-center justify-center rounded-full bg-rose-600 text-white shadow-glow-danger transition hover:bg-rose-700 focus:outline-none" title="Leave Meeting">
+                <button id="btn-leave" class="control-dock-btn flex h-12 w-15 md:h-13 md:w-16 items-center justify-center rounded-full bg-rose-600 text-white shadow-glow-danger transition hover:bg-rose-700 focus:outline-none" title="Leave Meeting">
                     <i class="fa-solid fa-phone-slash text-base"></i>
                 </button>
 

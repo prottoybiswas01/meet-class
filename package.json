@@ -1,0 +1,17 @@
+{
+  "name": "meet-class",
+  "version": "1.0.0",
+  "description": "High-Fidelity Virtual Classroom & WebRTC Meeting Suite",
+  "scripts": {
+    "start": "serve .",
+    "dev": "serve ."
+  },
+  "keywords": [
+    "webrtc",
+    "virtual-classroom",
+    "screen-sharing",
+    "peerjs"
+  ],
+  "author": "",
+  "license": "MIT"
+}
